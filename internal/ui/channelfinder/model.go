@@ -70,6 +70,22 @@ func (m *Model) MarkJoined(channelID string) {
 	}
 }
 
+// UpdateLastVisited sets the LastVisited timestamp for the matching
+// item, if any, and re-runs filter() if the overlay is currently
+// visible so the new ordering takes effect on the next render. No-op
+// for an unknown ID.
+func (m *Model) UpdateLastVisited(channelID string, ts int64) {
+	for i := range m.items {
+		if m.items[i].ID == channelID {
+			m.items[i].LastVisited = ts
+			if m.visible {
+				m.filter()
+			}
+			return
+		}
+	}
+}
+
 // SetBrowseable replaces the non-joined channel entries in the finder.
 // Joined items (added via SetItems) are preserved; previous non-joined items
 // are dropped and replaced with the new set. Items whose IDs already appear

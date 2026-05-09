@@ -478,6 +478,43 @@ func TestMarkJoined(t *testing.T) {
 	}
 }
 
+func TestUpdateLastVisitedMutatesAndReorders(t *testing.T) {
+	m := New()
+	m.SetItems([]Item{
+		{ID: "C1", Name: "alpha", Type: "channel", LastVisited: 100},
+		{ID: "C2", Name: "bravo", Type: "channel", LastVisited: 200},
+		{ID: "C3", Name: "charlie", Type: "channel", LastVisited: 50},
+	})
+	m.Open()
+
+	// Initial order: bravo(200), alpha(100), charlie(50)
+	if m.items[m.filtered[0]].Name != "bravo" {
+		t.Fatalf("setup: want bravo first, got %q", m.items[m.filtered[0]].Name)
+	}
+
+	// Visit charlie now (timestamp 999) — should jump to top.
+	m.UpdateLastVisited("C3", 999)
+
+	if m.items[m.filtered[0]].Name != "charlie" {
+		t.Errorf("after update: want charlie first, got %q", m.items[m.filtered[0]].Name)
+	}
+}
+
+func TestUpdateLastVisitedNoopForUnknownID(t *testing.T) {
+	m := New()
+	m.SetItems([]Item{
+		{ID: "C1", Name: "alpha", Type: "channel", LastVisited: 100},
+	})
+	m.Open()
+
+	// Should not panic or alter anything.
+	m.UpdateLastVisited("C-NONEXISTENT", 999)
+
+	if len(m.filtered) != 1 || m.items[0].LastVisited != 100 {
+		t.Errorf("unknown id should be a no-op; items=%+v filtered=%v", m.items, m.filtered)
+	}
+}
+
 func TestFilterWithQueryRecencyBreaksTies(t *testing.T) {
 	m := New()
 	// Two prefix matches for "eng": "engineering" (older) and "engagement" (newer).
