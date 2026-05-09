@@ -225,18 +225,31 @@ func (m *Model) filter() {
 	m.sortByTypeRankInPlace(prefixMatches)
 	m.sortByTypeRankInPlace(substringMatches)
 
-	// Stable sort subsequence matches by (typeRank asc, score desc) so
-	// the tightest / most word-boundary-aligned matches come first
-	// within each type-rank bucket.
+	// Stable sort subsequence matches by
+	// (LastVisited DESC, typeRank ASC, score DESC, Name ASC) so the
+	// most-recent match wins within a tier, with subsequence-score
+	// breaking deeper ties.
 	for i := 1; i < len(subsequenceMatches); i++ {
 		for j := i; j > 0; j-- {
-			ai := m.typeRank(subsequenceMatches[j-1].idx)
-			bi := m.typeRank(subsequenceMatches[j].idx)
-			if ai < bi {
-				break
-			}
-			if ai == bi && subsequenceMatches[j-1].score >= subsequenceMatches[j].score {
-				break
+			ai, bi := subsequenceMatches[j-1].idx, subsequenceMatches[j].idx
+			a, b := m.items[ai], m.items[bi]
+			if a.LastVisited != b.LastVisited {
+				if a.LastVisited > b.LastVisited {
+					break
+				}
+			} else {
+				ar, br := m.typeRank(ai), m.typeRank(bi)
+				if ar != br {
+					if ar < br {
+						break
+					}
+				} else if subsequenceMatches[j-1].score != subsequenceMatches[j].score {
+					if subsequenceMatches[j-1].score > subsequenceMatches[j].score {
+						break
+					}
+				} else if strings.ToLower(a.Name) <= strings.ToLower(b.Name) {
+					break
+				}
 			}
 			subsequenceMatches[j-1], subsequenceMatches[j] = subsequenceMatches[j], subsequenceMatches[j-1]
 		}
@@ -262,11 +275,13 @@ func (m *Model) typeRank(idx int) int {
 	}
 }
 
-// sortByTypeRankInPlace stably reorders idxs so items with a smaller
-// typeRank come first while preserving original order within each rank.
+// sortByTypeRankInPlace stably reorders idxs by
+// (LastVisited DESC, typeRank ASC, Name ASC). Used within a single
+// match tier (prefix or substring), where the tier itself is the
+// outer sort key.
 func (m *Model) sortByTypeRankInPlace(idxs []int) {
 	for i := 1; i < len(idxs); i++ {
-		for j := i; j > 0 && m.typeRank(idxs[j-1]) > m.typeRank(idxs[j]); j-- {
+		for j := i; j > 0 && m.lessByRecencyTypeRankName(idxs[j], idxs[j-1]); j-- {
 			idxs[j-1], idxs[j] = idxs[j], idxs[j-1]
 		}
 	}

@@ -477,3 +477,52 @@ func TestMarkJoined(t *testing.T) {
 		t.Error("expected MarkJoined to set Joined=true")
 	}
 }
+
+func TestFilterWithQueryRecencyBreaksTies(t *testing.T) {
+	m := New()
+	// Two prefix matches for "eng": "engineering" (older) and "engagement" (newer).
+	// Recency tiebreak should put "engagement" first.
+	m.SetItems([]Item{
+		{ID: "C1", Name: "engineering", Type: "channel", LastVisited: 100},
+		{ID: "C2", Name: "engagement", Type: "channel", LastVisited: 200},
+		{ID: "C3", Name: "marketing", Type: "channel", LastVisited: 999}, // no match
+	})
+	m.Open()
+	m.HandleKey("e")
+	m.HandleKey("n")
+	m.HandleKey("g")
+
+	if len(m.filtered) < 2 {
+		t.Fatalf("want at least 2 matches, got %d", len(m.filtered))
+	}
+	first := m.items[m.filtered[0]].Name
+	second := m.items[m.filtered[1]].Name
+	if first != "engagement" {
+		t.Errorf("want first match to be the more recent 'engagement', got %q", first)
+	}
+	if second != "engineering" {
+		t.Errorf("want second match to be 'engineering', got %q", second)
+	}
+}
+
+func TestFilterWithQueryMatchTierStillWins(t *testing.T) {
+	m := New()
+	// "engagement" is a prefix match (older); "ext-engineering" is a
+	// substring match (newer). Tier wins over recency: prefix first.
+	m.SetItems([]Item{
+		{ID: "C1", Name: "engagement", Type: "channel", LastVisited: 100},
+		{ID: "C2", Name: "ext-engineering", Type: "channel", LastVisited: 999},
+	})
+	m.Open()
+	m.HandleKey("e")
+	m.HandleKey("n")
+	m.HandleKey("g")
+
+	if len(m.filtered) < 2 {
+		t.Fatalf("want 2 matches, got %d", len(m.filtered))
+	}
+	first := m.items[m.filtered[0]].Name
+	if first != "engagement" {
+		t.Errorf("prefix match should beat newer substring match, got %q first", first)
+	}
+}
