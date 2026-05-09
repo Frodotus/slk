@@ -139,6 +139,12 @@ type WorkspaceContext struct {
 	Presence   string    // "active" or "away"; "" until first fetch
 	DNDEnabled bool      // true if either snooze or admin-DND is active
 	DNDEndTS   time.Time // unified end timestamp; zero if not in DND
+	// LastVisitedByChannel maps channelID -> unix-second timestamp of
+	// the user's most recent visit to that channel in this workspace.
+	// Populated once at connect from cache.GetChannelVisits and
+	// updated on every ChannelSelectedMsg via the visit recorder.
+	// Used to populate channelfinder.Item.LastVisited for sort.
+	LastVisitedByChannel map[string]int64
 }
 
 func main() {
@@ -1057,15 +1063,16 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 	}
 
 	wctx := &WorkspaceContext{
-		Client:      client,
-		TeamID:      client.TeamID(),
-		TeamName:    token.TeamName,
-		UserID:      client.UserID(),
-		UserNames:         make(map[string]string),
-		UserNamesByHandle: make(map[string]string),
-		BotUserIDs:        make(map[string]bool),
-		LastReadMap:       make(map[string]string),
-		CustomEmoji: make(map[string]string),
+		Client:               client,
+		TeamID:               client.TeamID(),
+		TeamName:             token.TeamName,
+		UserID:               client.UserID(),
+		UserNames:            make(map[string]string),
+		UserNamesByHandle:    make(map[string]string),
+		BotUserIDs:           make(map[string]bool),
+		LastReadMap:          make(map[string]string),
+		CustomEmoji:          make(map[string]string),
+		LastVisitedByChannel: make(map[string]int64),
 	}
 
 	// Seed user names + bot flags from cache (fast, local). The bot
@@ -1084,6 +1091,16 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 		if u.IsBot {
 			wctx.BotUserIDs[u.ID] = true
 		}
+	}
+
+	// Seed last-visited timestamps for the channel finder's recency
+	// sort. Best-effort: failure is logged and the map stays empty,
+	// which means the finder uses its default order until the user
+	// starts visiting channels.
+	if visits, err := db.GetChannelVisits(client.TeamID()); err != nil {
+		log.Printf("warning: loading channel visits for %s: %v", token.TeamName, err)
+	} else {
+		wctx.LastVisitedByChannel = visits
 	}
 
 	// Initialize Slack-native section store if enabled. Bootstrap is
@@ -1186,6 +1203,7 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 			}
 		}
 		wctx.Channels = append(wctx.Channels, item)
+		finderItem.LastVisited = wctx.LastVisitedByChannel[ch.ID]
 		wctx.FinderItems = append(wctx.FinderItems, finderItem)
 	}
 
@@ -1252,10 +1270,11 @@ func fetchBrowseableChannels(ctx context.Context, wctx *WorkspaceContext, p *tea
 			continue
 		}
 		browseable = append(browseable, channelfinder.Item{
-			ID:     ch.ID,
-			Name:   ch.Name,
-			Type:   "channel",
-			Joined: false,
+			ID:          ch.ID,
+			Name:        ch.Name,
+			Type:        "channel",
+			Joined:      false,
+			LastVisited: wctx.LastVisitedByChannel[ch.ID],
 		})
 	}
 
@@ -2309,6 +2328,7 @@ func (h *rtmEventHandler) OnConversationOpened(ch slack.Channel) {
 		// bootstrap (or a prior open) and carries no unread state to
 		// refresh, so re-appending would double-list the channel in
 		// Ctrl+T.
+		finderItem.LastVisited = h.wsCtx.LastVisitedByChannel[ch.ID]
 		h.wsCtx.FinderItems = append(h.wsCtx.FinderItems, finderItem)
 	}
 
