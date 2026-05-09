@@ -2890,3 +2890,129 @@ func TestChannelSelectedFromHistoryStillRecordsVisit(t *testing.T) {
 		t.Errorf("want recorded=[C2], got %v", recorded)
 	}
 }
+
+func TestNavStackPushOnChannelSelected(t *testing.T) {
+	app := NewApp()
+	app.activeTeamID = "T1"
+
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C1", Name: "a", Type: "channel"})
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C2", Name: "b", Type: "channel"})
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C3", Name: "c", Type: "channel"})
+
+	stack := app.navHistory["T1"]
+	if stack == nil {
+		t.Fatal("expected nav stack for T1 to exist")
+	}
+	want := []string{"C1", "C2", "C3"}
+	if !reflect.DeepEqual(stack.entries, want) {
+		t.Errorf("entries: want %v, got %v", want, stack.entries)
+	}
+	if stack.cursor != 2 {
+		t.Errorf("cursor: want 2, got %d", stack.cursor)
+	}
+}
+
+func TestNavStackDedupesConsecutive(t *testing.T) {
+	app := NewApp()
+	app.activeTeamID = "T1"
+
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C1", Name: "a", Type: "channel"})
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C1", Name: "a", Type: "channel"}) // re-select same
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C2", Name: "b", Type: "channel"})
+
+	stack := app.navHistory["T1"]
+	want := []string{"C1", "C2"}
+	if !reflect.DeepEqual(stack.entries, want) {
+		t.Errorf("entries: want %v, got %v", want, stack.entries)
+	}
+	if stack.cursor != 1 {
+		t.Errorf("cursor: want 1, got %d", stack.cursor)
+	}
+}
+
+func TestNavStackForwardTruncationOnNewVisit(t *testing.T) {
+	app := NewApp()
+	app.activeTeamID = "T1"
+
+	// Build A, B, C; back to B (simulated by directly manipulating cursor);
+	// then visit D — C should be dropped.
+	_, _ = app.Update(ChannelSelectedMsg{ID: "A", Name: "a", Type: "channel"})
+	_, _ = app.Update(ChannelSelectedMsg{ID: "B", Name: "b", Type: "channel"})
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C", Name: "c", Type: "channel"})
+
+	// Simulate a back step (cursor moves but entries don't change).
+	app.navHistory["T1"].cursor = 1
+
+	_, _ = app.Update(ChannelSelectedMsg{ID: "D", Name: "d", Type: "channel"})
+
+	stack := app.navHistory["T1"]
+	want := []string{"A", "B", "D"}
+	if !reflect.DeepEqual(stack.entries, want) {
+		t.Errorf("entries: want %v, got %v", want, stack.entries)
+	}
+	if stack.cursor != 2 {
+		t.Errorf("cursor: want 2, got %d", stack.cursor)
+	}
+}
+
+func TestNavStackCapAt50EvictsOldest(t *testing.T) {
+	app := NewApp()
+	app.activeTeamID = "T1"
+
+	for i := 0; i < 60; i++ {
+		_, _ = app.Update(ChannelSelectedMsg{ID: fmt.Sprintf("C%d", i), Name: "x", Type: "channel"})
+	}
+	stack := app.navHistory["T1"]
+	if len(stack.entries) != 50 {
+		t.Errorf("len: want 50, got %d", len(stack.entries))
+	}
+	if stack.entries[0] != "C10" {
+		t.Errorf("oldest after eviction: want C10, got %q", stack.entries[0])
+	}
+	if stack.entries[49] != "C59" {
+		t.Errorf("newest: want C59, got %q", stack.entries[49])
+	}
+	if stack.cursor != 49 {
+		t.Errorf("cursor: want 49, got %d", stack.cursor)
+	}
+}
+
+func TestNavStackPerWorkspaceIsolation(t *testing.T) {
+	app := NewApp()
+	app.activeTeamID = "T1"
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C1", Name: "a", Type: "channel"})
+
+	app.activeTeamID = "T2"
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C2", Name: "b", Type: "channel"})
+
+	t1 := app.navHistory["T1"]
+	t2 := app.navHistory["T2"]
+	if t1 == nil || t2 == nil {
+		t.Fatalf("expected both stacks to exist; t1=%v t2=%v", t1, t2)
+	}
+	if !reflect.DeepEqual(t1.entries, []string{"C1"}) {
+		t.Errorf("T1: want [C1], got %v", t1.entries)
+	}
+	if !reflect.DeepEqual(t2.entries, []string{"C2"}) {
+		t.Errorf("T2: want [C2], got %v", t2.entries)
+	}
+}
+
+func TestNavStackFromHistoryDoesNotPush(t *testing.T) {
+	app := NewApp()
+	app.activeTeamID = "T1"
+
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C1", Name: "a", Type: "channel"})
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C2", Name: "b", Type: "channel"})
+
+	// FromHistory navigation should NOT grow the stack.
+	_, _ = app.Update(ChannelSelectedMsg{ID: "C1", Name: "a", Type: "channel", FromHistory: true})
+
+	stack := app.navHistory["T1"]
+	if !reflect.DeepEqual(stack.entries, []string{"C1", "C2"}) {
+		t.Errorf("entries should be unchanged; got %v", stack.entries)
+	}
+	if stack.cursor != 1 {
+		t.Errorf("cursor should be unchanged at 1, got %d", stack.cursor)
+	}
+}

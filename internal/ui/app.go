@@ -52,6 +52,19 @@ const (
 	PanelThread
 )
 
+// navStack is a per-workspace browser-style back/forward history of
+// channel IDs. cursor points at the current entry; len(entries)==0
+// is the empty state with cursor==-1.
+type navStack struct {
+	entries []string
+	cursor  int
+}
+
+// navStackMax caps the per-workspace history at 50 entries. When a
+// push would exceed the cap, the oldest entry is dropped and the
+// cursor is shifted accordingly.
+const navStackMax = 50
+
 // editState tracks an in-progress message edit. When active, the
 // channel or thread compose box is repurposed: its existing draft is
 // stashed, the message text seeded, and Enter submits an
@@ -732,6 +745,11 @@ type App struct {
 	// channel is no longer in the list.
 	lastChannelByTeam map[string]string
 
+	// navHistory holds the per-workspace ctrl+h / ctrl+k browser-style
+	// jump list. Lazy-initialized on first push for each team. Cleared
+	// only when slk exits — the stack is session-only by design.
+	navHistory map[string]*navStack
+
 	// Theme switching
 	themeSaveFn    func(name string, scope themeswitcher.ThemeScope)
 	themeOverrides config.Theme
@@ -876,6 +894,7 @@ func NewApp() *App {
 		userNames:            map[string]string{},
 		statusByTeam:         map[string]workspaceStatus{},
 		lastChannelByTeam:    map[string]string{},
+		navHistory:           make(map[string]*navStack),
 		clipboardRead:        defaultClipboardReader,
 	}
 	// Seed the picker with built-in emojis so the autocomplete works even
@@ -1354,6 +1373,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// asynchronously via main.go's recorder closure.
 		if a.channelVisitRecorder != nil {
 			a.channelVisitRecorder(msg.ID)
+		}
+		if !msg.FromHistory {
+			a.pushNavHistory(a.activeTeamID, msg.ID)
 		}
 		// Tell the sidebar which channel is active so the staleness
 		// filter never hides it out from under the user.
@@ -2248,6 +2270,37 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return a.handlePresenceCustomSnoozeMode(msg)
 	default:
 		return a.handleNormalMode(msg)
+	}
+}
+
+// pushNavHistory appends channelID onto the team's navigation stack.
+// Behavior:
+//   - Lazy-creates the stack on first push.
+//   - Dedupes consecutive: a no-op if entries[cursor] == channelID.
+//   - Truncates the forward path: cursor < len-1 entries beyond cursor
+//     are dropped (browser-style "new visit kills forward history").
+//   - Caps at navStackMax: drops oldest entries and shifts cursor.
+func (a *App) pushNavHistory(teamID, channelID string) {
+	if teamID == "" || channelID == "" {
+		return
+	}
+	stack, ok := a.navHistory[teamID]
+	if !ok {
+		stack = &navStack{cursor: -1}
+		a.navHistory[teamID] = stack
+	}
+	if stack.cursor >= 0 && stack.cursor < len(stack.entries) && stack.entries[stack.cursor] == channelID {
+		return
+	}
+	if stack.cursor < len(stack.entries)-1 {
+		stack.entries = stack.entries[:stack.cursor+1]
+	}
+	stack.entries = append(stack.entries, channelID)
+	stack.cursor = len(stack.entries) - 1
+	if len(stack.entries) > navStackMax {
+		drop := len(stack.entries) - navStackMax
+		stack.entries = stack.entries[drop:]
+		stack.cursor -= drop
 	}
 }
 
