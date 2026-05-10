@@ -20,12 +20,12 @@ import (
 	"encoding/hex"
 	"image"
 	"io"
-	"log"
 	"strings"
 	"sync"
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/gammons/slk/internal/debuglog"
 	imgpkg "github.com/gammons/slk/internal/image"
 	"github.com/gammons/slk/internal/ui/styles"
 )
@@ -157,7 +157,7 @@ func fetchOrPlaceholder(url string, target image.Point, ctx Context, rowStart in
 				delete(inflightURL, key)
 				inflightURLMu.Unlock()
 				if err != nil {
-					log.Printf("blockkit image fetch failed: key=%s url=%s err=%v", key, url, err)
+					debuglog.ImgFetch("blockkit image fetch failed: key=%s url=%s err=%v", key, url, err)
 					return
 				}
 				if send != nil {
