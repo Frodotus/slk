@@ -721,17 +721,7 @@ func run() error {
 			// Mark channel as read up to the latest message
 			if len(msgItems) > 0 {
 				latestTS := msgItems[len(msgItems)-1].TS
-				// Capture before goroutine to avoid racing with router.Set.
-				client := wctx.Client
-				lastReadMap := wctx.LastReadMap
-				go func() {
-					_ = client.MarkChannel(ctx, channelID, latestTS)
-					_ = db.UpdateLastReadTS(channelID, latestTS)
-					lastReadMap[channelID] = latestTS
-					if p != nil {
-						p.Send(ui.ChannelMarkedReadMsg{ChannelID: channelID})
-					}
-				}()
+				markChannelReadAsync(ctx, wctx, db, p, channelID, latestTS)
 			}
 
 			return ui.MessagesLoadedMsg{
@@ -739,6 +729,12 @@ func run() error {
 				Messages:   msgItems,
 				LastReadTS: lastReadTS,
 			}
+		})
+
+		app.SetChannelReadMarker(func(channelID, ts string) tea.Msg {
+			wctx := router.Active()
+			markChannelReadAsync(ctx, wctx, db, p, channelID, ts)
+			return nil // ChannelMarkedReadMsg is emitted from inside the goroutine
 		})
 
 		app.SetMessageSender(func(channelID, text string) tea.Msg {
@@ -1747,6 +1743,31 @@ func summarizeCachedRows(rows []cache.Message) string {
 	}
 	return fmt.Sprintf("count=%d oldest=%s newest=%s",
 		len(rows), rows[0].TS, rows[len(rows)-1].TS)
+}
+
+// markChannelReadAsync fires Slack's conversations.mark plus the local
+// LastReadTS persistence in a background goroutine. Returns
+// immediately. wctx may be nil (returns silently in that case).
+func markChannelReadAsync(
+	ctx context.Context,
+	wctx *WorkspaceContext,
+	db *cache.DB,
+	p *tea.Program,
+	channelID, ts string,
+) {
+	if wctx == nil || ts == "" {
+		return
+	}
+	client := wctx.Client
+	lastReadMap := wctx.LastReadMap
+	go func() {
+		_ = client.MarkChannel(ctx, channelID, ts)
+		_ = db.UpdateLastReadTS(channelID, ts)
+		lastReadMap[channelID] = ts
+		if p != nil {
+			p.Send(ui.ChannelMarkedReadMsg{ChannelID: channelID})
+		}
+	}()
 }
 
 // loadCachedMessages reads up to 50 cached messages for a channel from
