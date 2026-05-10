@@ -10,6 +10,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/gammons/slk/internal/debuglog"
 	emojiutil "github.com/gammons/slk/internal/emoji"
 	imgpkg "github.com/gammons/slk/internal/image"
 	"github.com/gammons/slk/internal/ui/imgrender"
@@ -456,6 +457,12 @@ func channelGlyph(chType string) string {
 }
 
 func (m *Model) SetMessages(msgs []MessageItem) {
+	if debuglog.Enabled() {
+		oldSummary := summarizeMessageItems(m.messages)
+		newSummary := summarizeMessageItems(msgs)
+		debuglog.Cache("messages.Model.SetMessages: channel=%q before=[%s] after=[%s]",
+			m.channelName, oldSummary, newSummary)
+	}
 	m.messages = msgs
 	m.ClearSelection()
 	m.cache = nil // invalidate cache
@@ -688,6 +695,10 @@ func (m *Model) PrependMessages(msgs []MessageItem) {
 		return
 	}
 	count := len(msgs)
+	if debuglog.Enabled() {
+		debuglog.Cache("messages.Model.PrependMessages: channel=%q count_before=%d count_added=%d added=[%s]",
+			m.channelName, len(m.messages), count, summarizeMessageItems(msgs))
+	}
 	m.messages = append(msgs, m.messages...)
 	m.selected += count
 	m.cache = nil // invalidate cache
@@ -2457,4 +2468,16 @@ func formatDateSeparator(dateStr string) string {
 	default:
 		return d.Format("Monday, January 2, 2006")
 	}
+}
+
+// summarizeMessageItems collapses a slice into a compact
+// "count=N oldest=<ts> newest=<ts>" string for [cache] log lines.
+// Empty/nil slices return "count=0". Mirrors summarizeMessages in
+// cmd/slk/main.go but lives here to avoid a circular import.
+func summarizeMessageItems(items []MessageItem) string {
+	if len(items) == 0 {
+		return "count=0"
+	}
+	return fmt.Sprintf("count=%d oldest=%s newest=%s",
+		len(items), items[0].TS, items[len(items)-1].TS)
 }
