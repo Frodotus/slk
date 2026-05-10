@@ -120,10 +120,9 @@ func (db *DB) GetLastReadTS(channelID string) (string, error) {
 
 // SetChannelSyncedAt stores the unix timestamp (seconds) at which the
 // channel's message cache was last authoritatively replaced from the
-// network. UPSERT-style: if the channel row doesn't exist yet, this
-// inserts a stub row with workspace_id="" and name=""; callers should
-// have UpsertChannel'd first. The implementation uses UPDATE so that
-// it only touches existing rows, avoiding the stub-row footgun.
+// network. Implemented as an UPDATE so it only touches existing rows;
+// callers must have UpsertChannel'd the channel first, otherwise this
+// is a silent no-op (rows-affected is not checked).
 func (db *DB) SetChannelSyncedAt(channelID string, unixSec int64) error {
 	_, err := db.conn.Exec(`UPDATE channels SET synced_at = ? WHERE id = ?`, unixSec, channelID)
 	if err != nil {
