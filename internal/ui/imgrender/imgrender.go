@@ -14,6 +14,7 @@ import (
 	"image"
 	"io"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -339,23 +340,33 @@ func (r *Renderer) RenderBlock(att Block, channel, ts string, availWidth, baseRo
 			return BlockResult{Lines: buildPlaceholder(att.Name, target), Height: target.Y, Hit: hit}
 		}
 		r.fetching[key] = struct{}{}
+		reqID := debuglog.NextReqID()
+		debuglog.ImgFetch("enqueue: key=%s url=%s panel=msgs channel=%s ts=%s req_id=%d fetching_set_size=%d",
+			key, url, channel, ts, reqID, len(r.fetching))
 		ctx := r.ctx // capture for the goroutine
 		go func() {
+			fetchStart := time.Now()
 			_, err := ctx.Fetcher.Fetch(context.Background(), imgpkg.FetchRequest{
 				Key:        key,
 				URL:        url,
 				Target:     pixelTarget,
 				CellTarget: target,
+				ReqID:      reqID,
 			})
 			if ctx.SendMsg == nil {
+				debuglog.ImgFetch("dispatch: key=%s req_id=%d total_ms=%d kind=skipped (SendMsg=nil)",
+					key, reqID, time.Since(fetchStart).Milliseconds())
 				return
 			}
 			if err != nil {
-				debuglog.ImgFetch("image fetch failed: key=%s url=%s err=%v", key, url, err)
-				ctx.SendMsg(ImageFailedMsg{Key: key})
+				debuglog.ImgFetch("dispatch: key=%s req_id=%d total_ms=%d kind=failed err=%v",
+					key, reqID, time.Since(fetchStart).Milliseconds(), err)
+				ctx.SendMsg(ImageFailedMsg{Key: key, ReqID: reqID})
 				return
 			}
-			ctx.SendMsg(ImageReadyMsg{Channel: channel, TS: ts, Key: key})
+			debuglog.ImgFetch("dispatch: key=%s req_id=%d total_ms=%d kind=ready",
+				key, reqID, time.Since(fetchStart).Milliseconds())
+			ctx.SendMsg(ImageReadyMsg{Channel: channel, TS: ts, Key: key, ReqID: reqID})
 		}()
 		return BlockResult{Lines: buildPlaceholder(att.Name, target), Height: target.Y, Hit: hit}
 	}
