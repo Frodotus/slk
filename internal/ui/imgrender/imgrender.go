@@ -300,14 +300,17 @@ func (r *Renderer) RenderBlock(att Block, channel, ts string, availWidth, baseRo
 	// Fall through to the legacy text line for any attachment we can't
 	// or shouldn't render inline.
 	if att.Kind != "image" || r.ctx.Protocol == imgpkg.ProtoOff || r.ctx.Fetcher == nil {
+		debuglog.ImgRender("RenderBlock: file_id=%s decision=legacy_text reason=non_image_or_off", att.FileID)
 		return BlockResult{Lines: []string{renderLegacyLine(att)}, Height: 1}
 	}
 	if att.FileID == "" {
+		debuglog.ImgRender("RenderBlock: decision=legacy_text reason=no_file_id name=%q", att.Name)
 		return BlockResult{Lines: []string{renderLegacyLine(att)}, Height: 1}
 	}
 
 	target := computeImageTarget(att.Thumbs, r.ctx, availWidth)
 	if target.X <= 0 || target.Y <= 0 {
+		debuglog.ImgRender("RenderBlock: file_id=%s decision=legacy_text reason=zero_target", att.FileID)
 		return BlockResult{Lines: []string{renderLegacyLine(att)}, Height: 1}
 	}
 
@@ -318,6 +321,7 @@ func (r *Renderer) RenderBlock(att Block, channel, ts string, availWidth, baseRo
 	}
 	url, suffix := imgpkg.PickThumb(imgThumbs, pixelTarget)
 	if url == "" {
+		debuglog.ImgRender("RenderBlock: file_id=%s decision=legacy_text reason=no_thumb_url", att.FileID)
 		return BlockResult{Lines: []string{renderLegacyLine(att)}, Height: 1}
 	}
 	key := att.FileID + "-" + suffix
@@ -334,9 +338,11 @@ func (r *Renderer) RenderBlock(att Block, channel, ts string, availWidth, baseRo
 	img, cached := r.ctx.Fetcher.Cached(key, pixelTarget)
 	if !cached {
 		if _, failed := r.failed[key]; failed {
+			debuglog.ImgRender("RenderBlock: key=%s decision=placeholder_failed", key)
 			return BlockResult{Lines: buildPlaceholder(att.Name, target), Height: target.Y, Hit: hit}
 		}
 		if _, inFlight := r.fetching[key]; inFlight {
+			debuglog.ImgRender("RenderBlock: key=%s decision=placeholder_in_flight", key)
 			return BlockResult{Lines: buildPlaceholder(att.Name, target), Height: target.Y, Hit: hit}
 		}
 		r.fetching[key] = struct{}{}
@@ -368,6 +374,7 @@ func (r *Renderer) RenderBlock(att Block, channel, ts string, availWidth, baseRo
 				key, reqID, time.Since(fetchStart).Milliseconds())
 			ctx.SendMsg(ImageReadyMsg{Channel: channel, TS: ts, Key: key, ReqID: reqID})
 		}()
+		debuglog.ImgRender("RenderBlock: key=%s decision=placeholder_spawned_fetch req_id=%d", key, reqID)
 		return BlockResult{Lines: buildPlaceholder(att.Name, target), Height: target.Y, Hit: hit}
 	}
 
@@ -385,6 +392,8 @@ func (r *Renderer) RenderBlock(att Block, channel, ts string, availWidth, baseRo
 		} else if pr.OnFlush != nil {
 			fl = []func(io.Writer) error{pr.OnFlush}
 		}
+		debuglog.ImgRender("RenderBlock: key=%s decision=prerendered proto=%v target=(%d,%d)",
+			key, r.ctx.Protocol, target.X, target.Y)
 		return BlockResult{Lines: pr.Lines, Flushes: fl, SixelRows: sxlMap, Height: target.Y, Hit: hit}
 	}
 
@@ -397,6 +406,8 @@ func (r *Renderer) RenderBlock(att Block, channel, ts string, availWidth, baseRo
 		if out.OnFlush != nil {
 			fl = []func(io.Writer) error{out.OnFlush}
 		}
+		debuglog.ImgRender("RenderBlock: key=%s decision=cached_kitty_slow target=(%d,%d)",
+			key, target.X, target.Y)
 		return BlockResult{Lines: out.Lines, Flushes: fl, Height: target.Y, Hit: hit}
 	}
 
@@ -415,6 +426,8 @@ func (r *Renderer) RenderBlock(att Block, channel, ts string, availWidth, baseRo
 	} else if out.OnFlush != nil {
 		fl = []func(io.Writer) error{out.OnFlush}
 	}
+	debuglog.ImgRender("RenderBlock: key=%s decision=cached_slow proto=%v target=(%d,%d)",
+		key, r.ctx.Protocol, target.X, target.Y)
 	return BlockResult{Lines: out.Lines, Flushes: fl, SixelRows: sxlMap, Height: target.Y, Hit: hit}
 }
 
