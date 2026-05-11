@@ -26,7 +26,10 @@ func Convert(input string) (string, *slack.RichTextBlock) {
 	tokenized, table := tokenize(input)
 
 	md := goldmark.New(
-		goldmark.WithExtensions(extension.Strikethrough),
+		goldmark.WithExtensions(
+			extension.Strikethrough,
+			extension.Linkify,
+		),
 	)
 	doc := md.Parser().Parse(text.NewReader([]byte(tokenized)))
 

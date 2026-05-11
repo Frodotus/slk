@@ -24,6 +24,7 @@ const (
 	tokChannel
 	tokBroadcast
 	tokLink
+	tokEmoji
 )
 
 // token holds the original wire-form payload for one <...> match.
@@ -42,12 +43,18 @@ type token struct {
 }
 
 // Patterns are tried in order; first match wins. None overlap given
-// their leading characters (<@, <#, <!, <h).
+// their leading characters (<@, <#, <!, <h, :).
 var (
 	reUser      = regexp.MustCompile(`<@([UW][A-Z0-9]+)>`)
 	reChannel   = regexp.MustCompile(`<#([CG][A-Z0-9]+)(?:\|([^>]*))?>`)
 	reBroadcast = regexp.MustCompile(`<!([a-z]+(?:\^[A-Za-z0-9]+)?)(?:\|([^>]*))?>`)
 	reLink      = regexp.MustCompile(`<(https?://[^|>]+)(?:\|([^>]*))?>`)
+	// Slack emoji shortcode. Matches the canonical wire form
+	// :name: where name uses lowercase ASCII letters, digits,
+	// underscores, plus, or hyphen. Skin-tone modifiers like
+	// :skin-tone-3: parse as their own emoji (matching what
+	// Slack web does — adjacent emoji elements compose visually).
+	reEmoji = regexp.MustCompile(`:([a-z0-9_+-]+):`)
 )
 
 // tokenize replaces all Slack wire-form tokens in s with sentinel
@@ -70,8 +77,10 @@ func tokenize(s string) (string, []token) {
 
 	i := 0
 	for i < len(s) {
-		// Fast path: skip ahead until we see '<'.
-		j := strings.IndexByte(s[i:], '<')
+		// Fast path: skip ahead until we see a candidate byte. Wire-
+		// form tokens all start with '<'; emoji shortcodes start with
+		// ':'. IndexAny returns the earliest of the two.
+		j := strings.IndexAny(s[i:], "<:")
 		if j < 0 {
 			b.WriteString(s[i:])
 			break
@@ -79,40 +88,55 @@ func tokenize(s string) (string, []token) {
 		b.WriteString(s[i : i+j])
 		i += j
 
-		// Try each pattern at position i.
 		matched := false
-		for _, p := range []struct {
-			re   *regexp.Regexp
-			kind tokenKind
-		}{
-			{reUser, tokUser},
-			{reChannel, tokChannel},
-			{reBroadcast, tokBroadcast},
-			{reLink, tokLink},
-		} {
-			loc := p.re.FindStringSubmatchIndex(s[i:])
-			if loc == nil || loc[0] != 0 {
-				continue
+		switch s[i] {
+		case '<':
+			// Try each wire-form pattern at position i.
+			for _, p := range []struct {
+				re   *regexp.Regexp
+				kind tokenKind
+			}{
+				{reUser, tokUser},
+				{reChannel, tokChannel},
+				{reBroadcast, tokBroadcast},
+				{reLink, tokLink},
+			} {
+				loc := p.re.FindStringSubmatchIndex(s[i:])
+				if loc == nil || loc[0] != 0 {
+					continue
+				}
+				// loc is relative to s[i:].
+				full := s[i : i+loc[1]]
+				tok := token{kind: p.kind}
+				tok.id = s[i+loc[2] : i+loc[3]]
+				// Optional label group only exists for patterns with 2 captures.
+				if len(loc) >= 6 && loc[4] >= 0 {
+					tok.label = s[i+loc[4] : i+loc[5]]
+				}
+				table = append(table, tok)
+				b.WriteRune(sentinelStart)
+				b.WriteString(strconv.Itoa(len(table) - 1))
+				b.WriteRune(sentinelEnd)
+				i += len(full)
+				matched = true
+				break
 			}
-			// loc is relative to s[i:].
-			full := s[i : i+loc[1]]
-			tok := token{kind: p.kind}
-			tok.id = s[i+loc[2] : i+loc[3]]
-			// Optional label group only exists for patterns with 2 captures.
-			if len(loc) >= 6 && loc[4] >= 0 {
-				tok.label = s[i+loc[4] : i+loc[5]]
+		case ':':
+			loc := reEmoji.FindStringSubmatchIndex(s[i:])
+			if loc != nil && loc[0] == 0 {
+				full := s[i : i+loc[1]]
+				tok := token{kind: tokEmoji, id: s[i+loc[2] : i+loc[3]]}
+				table = append(table, tok)
+				b.WriteRune(sentinelStart)
+				b.WriteString(strconv.Itoa(len(table) - 1))
+				b.WriteRune(sentinelEnd)
+				i += len(full)
+				matched = true
 			}
-			table = append(table, tok)
-			b.WriteRune(sentinelStart)
-			b.WriteString(strconv.Itoa(len(table) - 1))
-			b.WriteRune(sentinelEnd)
-			i += len(full)
-			matched = true
-			break
 		}
 		if !matched {
-			// Not a recognised Slack token; leave the '<' in place.
-			b.WriteByte('<')
+			// Not a recognised token; copy the candidate byte literally.
+			b.WriteByte(s[i])
 			i++
 		}
 	}
@@ -220,6 +244,8 @@ func wireForm(t token) string {
 			return "<" + t.id + ">"
 		}
 		return "<" + t.id + "|" + t.label + ">"
+	case tokEmoji:
+		return ":" + t.id + ":"
 	}
 	return ""
 }

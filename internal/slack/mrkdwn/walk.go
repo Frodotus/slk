@@ -140,6 +140,8 @@ func (w *walker) walkInline(n ast.Node) {
 		w.mrkdwn.WriteString("`")
 	case *ast.Link:
 		w.handleLink(n)
+	case *ast.AutoLink:
+		w.handleAutoLink(n)
 	case *extensionAST.Strikethrough:
 		w.mrkdwn.WriteString("~")
 		prev := w.inheritedStyle
@@ -273,6 +275,43 @@ func (w *walker) handleLink(n *ast.Link) {
 		w.mrkdwn.WriteString(label)
 		w.mrkdwn.WriteString(">")
 	}
+
+	if w.curSection == nil {
+		w.curSection = slack.NewRichTextSection()
+	}
+	link := slack.NewRichTextSectionLinkElement(url, label, w.copyStyle())
+	w.curSection.Elements = append(w.curSection.Elements, link)
+}
+
+// handleAutoLink emits a goldmark AutoLink (produced by the Linkify
+// extension or by CommonMark `<https://…>` syntax that wasn't caught
+// by the pre-goldmark wire-form tokenizer) as Slack mrkdwn and as a
+// RichTextSectionLinkElement.
+//
+// AutoLink.URL() returns the canonical URL (with `http://` prepended
+// for www-only matches and `mailto:` prepended for emails). Label()
+// returns the bytes the user actually typed. When the two match we
+// emit `<url>`; otherwise we emit `<url|label>` so the mrkdwn
+// fallback preserves the original surface form.
+func (w *walker) handleAutoLink(n *ast.AutoLink) {
+	url := string(n.URL(w.source))
+	label := string(n.Label(w.source))
+
+	// goldmark's Linkify extension does not set Protocol for email
+	// matches, so AutoLink.URL() returns the bare address. Slack
+	// needs an explicit mailto: scheme on the link element to render
+	// it as a clickable mail link.
+	if n.AutoLinkType == ast.AutoLinkEmail && !strings.HasPrefix(url, "mailto:") {
+		url = "mailto:" + url
+	}
+
+	w.mrkdwn.WriteString("<")
+	w.mrkdwn.WriteString(url)
+	if label != "" && label != url {
+		w.mrkdwn.WriteString("|")
+		w.mrkdwn.WriteString(label)
+	}
+	w.mrkdwn.WriteString(">")
 
 	if w.curSection == nil {
 		w.curSection = slack.NewRichTextSection()
@@ -415,7 +454,7 @@ func (w *walker) walkRawHTMLBlock(n *ast.HTMLBlock) {
 	w.mrkdwn.WriteString("\n\n")
 
 	sec := slack.NewRichTextSection()
-	sec.Elements = append(sec.Elements, slack.NewRichTextSectionTextElement(body, nil))
+	sec.Elements = append(sec.Elements, slack.NewRichTextSectionTextElement(detokenizeText(body, w.table), nil))
 	w.block.Elements = append(w.block.Elements, sec)
 }
 
@@ -438,10 +477,15 @@ func (w *walker) walkCodeBlock(n ast.Node) {
 	w.mrkdwn.WriteString(body)
 	w.mrkdwn.WriteString("```\n")
 
+	// Code-block contents must be literal: any sentinels embedded by
+	// tokenize (emoji shortcodes, <@user> mentions, etc.) need to
+	// round-trip back to their original surface form rather than
+	// leak raw PUA bytes through to Slack. detokenizeText restores
+	// all sentinels to their wire-form representation.
 	pre := &slack.RichTextPreformatted{
 		Type: slack.RTEPreformatted,
 		Elements: []slack.RichTextSectionElement{
-			slack.NewRichTextSectionTextElement(body, nil),
+			slack.NewRichTextSectionTextElement(detokenizeText(body, w.table), nil),
 		},
 	}
 	w.block.Elements = append(w.block.Elements, pre)
@@ -484,7 +528,7 @@ func (w *walker) walkRawBlock(n ast.Node) {
 	if w.curSection == nil {
 		w.curSection = slack.NewRichTextSection()
 	}
-	te := slack.NewRichTextSectionTextElement(prefix+body, nil)
+	te := slack.NewRichTextSectionTextElement(detokenizeText(prefix+body, w.table), nil)
 	w.curSection.Elements = append(w.curSection.Elements, te)
 	w.flushSection()
 }
@@ -525,21 +569,66 @@ func (w *walker) appendText(s string) {
 			// and emit the run between [i, j) as a text element.
 			j := nextSentinelStart(s, i)
 			if j > i {
-				te := slack.NewRichTextSectionTextElement(s[i:j], w.copyStyle())
-				w.curSection.Elements = append(w.curSection.Elements, te)
+				w.appendTextElement(s[i:j])
 			}
 			i = j
 			continue
 		}
 		if idx >= 0 && idx < len(w.table) {
-			w.curSection.Elements = append(w.curSection.Elements, w.tokenElement(w.table[idx]))
+			w.appendTokenElement(w.table[idx])
 		} else {
 			// Out-of-range index, emit raw bytes.
-			te := slack.NewRichTextSectionTextElement(s[i:end], w.copyStyle())
-			w.curSection.Elements = append(w.curSection.Elements, te)
+			w.appendTextElement(s[i:end])
 		}
 		i = end
 	}
+}
+
+// appendTextElement adds a text element to curSection, coalescing
+// with the trailing element when it is also a text element carrying
+// the same style. The Linkify extension parses text token-by-token
+// so consecutive words arrive as separate ast.Text nodes; without
+// coalescing every space-separated word becomes its own RichTextSection
+// element on the wire, which is wasteful and uglies up debug output.
+func (w *walker) appendTextElement(text string) {
+	if text == "" {
+		return
+	}
+	style := w.copyStyle()
+	if n := len(w.curSection.Elements); n > 0 {
+		if prev, ok := w.curSection.Elements[n-1].(*slack.RichTextSectionTextElement); ok {
+			if styleEqual(prev.Style, style) {
+				prev.Text += text
+				return
+			}
+		}
+	}
+	te := slack.NewRichTextSectionTextElement(text, style)
+	w.curSection.Elements = append(w.curSection.Elements, te)
+}
+
+// appendTokenElement converts a wire-form token into the right typed
+// element (or, for emoji tokens within code style, a literal text
+// element). Routes through appendTextElement when the result is a
+// text element so style-coalescing still applies.
+func (w *walker) appendTokenElement(t token) {
+	if el := w.tokenElement(t); el != nil {
+		w.curSection.Elements = append(w.curSection.Elements, el)
+	}
+}
+
+// styleEqual reports whether two style pointers describe the same
+// style. nil and an all-zero struct are treated as equal — both mean
+// "no style flags set" on the wire.
+func styleEqual(a, b *slack.RichTextSectionTextStyle) bool {
+	var av, bv slack.RichTextSectionTextStyle
+	if a != nil {
+		av = *a
+	}
+	if b != nil {
+		bv = *b
+	}
+	return av == bv
 }
 
 // nextSentinelStart returns the byte index of the next sentinelStart
@@ -572,6 +661,17 @@ func (w *walker) tokenElement(t token) slack.RichTextSectionElement {
 			text = t.id
 		}
 		return slack.NewRichTextSectionLinkElement(t.id, text, style)
+	case tokEmoji:
+		// Inside a code span the user wants the literal :name: text
+		// (e.g., yaml keys, IRC nicks). Emit a text element carrying
+		// the Code style; the surrounding ``` mrkdwn fallback bytes
+		// are already in place. Note: appendText is the call site
+		// for non-code-block contexts; fenced code blocks go through
+		// walkCodeBlock which detokenizes the body itself.
+		if w.inheritedStyle.Code {
+			return slack.NewRichTextSectionTextElement(":"+t.id+":", style)
+		}
+		return slack.NewRichTextSectionEmojiElement(t.id, 0, style)
 	}
 	return nil
 }

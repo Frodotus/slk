@@ -2,6 +2,7 @@ package mrkdwn
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/slack-go/slack"
@@ -655,5 +656,246 @@ func TestConvert_BackslashEscape(t *testing.T) {
 	}
 	if te.Style != nil {
 		t.Errorf("style = %+v, want nil for escaped asterisks", te.Style)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bare URL autolinking (Linkify)
+//
+// Slack renders the rich_text block when present, so a bare URL typed by
+// the user must be emitted as a RichTextSectionLinkElement, not as a
+// plain text element. The mrkdwn fallback must also wrap the URL in
+// <...> so Slack's mrkdwn parser would render it as a link if the block
+// were ever stripped.
+// ---------------------------------------------------------------------------
+
+func TestConvert_BareHTTPSAutolinked(t *testing.T) {
+	mr, blk := Convert("visit https://example.com today")
+	want := "visit <https://example.com> today"
+	if mr != want {
+		t.Errorf("mrkdwn = %q, want %q", mr, want)
+	}
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	if len(sec.Elements) != 3 {
+		t.Fatalf("got %d elements, want 3 (text, link, text); block=%s", len(sec.Elements), blockJSON(blk))
+	}
+	link, ok := sec.Elements[1].(*slack.RichTextSectionLinkElement)
+	if !ok {
+		t.Fatalf("middle element is %T, want *RichTextSectionLinkElement", sec.Elements[1])
+	}
+	if link.URL != "https://example.com" {
+		t.Errorf("link URL = %q, want %q", link.URL, "https://example.com")
+	}
+}
+
+func TestConvert_BareHTTPAutolinked(t *testing.T) {
+	_, blk := Convert("see http://example.com")
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	var link *slack.RichTextSectionLinkElement
+	for _, el := range sec.Elements {
+		if l, ok := el.(*slack.RichTextSectionLinkElement); ok {
+			link = l
+			break
+		}
+	}
+	if link == nil {
+		t.Fatalf("no link element found; block=%s", blockJSON(blk))
+	}
+	if link.URL != "http://example.com" {
+		t.Errorf("link URL = %q, want %q", link.URL, "http://example.com")
+	}
+}
+
+func TestConvert_BareWWWAutolinked(t *testing.T) {
+	// goldmark's Linkify prepends "http://" to www-only matches.
+	_, blk := Convert("visit www.example.com")
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	var link *slack.RichTextSectionLinkElement
+	for _, el := range sec.Elements {
+		if l, ok := el.(*slack.RichTextSectionLinkElement); ok {
+			link = l
+			break
+		}
+	}
+	if link == nil {
+		t.Fatalf("no link element found; block=%s", blockJSON(blk))
+	}
+	if link.URL != "http://www.example.com" {
+		t.Errorf("link URL = %q, want %q", link.URL, "http://www.example.com")
+	}
+}
+
+func TestConvert_BareEmailAutolinked(t *testing.T) {
+	// goldmark's Linkify emits an AutoLink with Protocol="mailto" for
+	// email addresses; URL() therefore returns "mailto:foo@bar.com".
+	_, blk := Convert("email foo@bar.com please")
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	var link *slack.RichTextSectionLinkElement
+	for _, el := range sec.Elements {
+		if l, ok := el.(*slack.RichTextSectionLinkElement); ok {
+			link = l
+			break
+		}
+	}
+	if link == nil {
+		t.Fatalf("no link element found; block=%s", blockJSON(blk))
+	}
+	if link.URL != "mailto:foo@bar.com" {
+		t.Errorf("link URL = %q, want %q", link.URL, "mailto:foo@bar.com")
+	}
+	if link.Text != "foo@bar.com" {
+		t.Errorf("link Text = %q, want %q (label is the typed address, no mailto: prefix)", link.Text, "foo@bar.com")
+	}
+}
+
+func TestConvert_BareURLInsideBoldCarriesBoldStyle(t *testing.T) {
+	// Autolinks under an emphasis node should inherit Bold the same
+	// way explicit [text](url) links already do.
+	_, blk := Convert("**see https://x.com**")
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	for _, el := range sec.Elements {
+		if link, ok := el.(*slack.RichTextSectionLinkElement); ok {
+			if link.Style == nil || !link.Style.Bold {
+				t.Errorf("link style = %+v, want Bold=true", link.Style)
+			}
+			return
+		}
+	}
+	t.Errorf("did not find a link element; block=%s", blockJSON(blk))
+}
+
+// ---------------------------------------------------------------------------
+// Emoji shortcodes
+//
+// Slack's rich_text renderer does NOT convert :name: inside text
+// elements; it expects typed RichTextSectionEmojiElement entries. The
+// mrkdwn fallback keeps :name: as-is because Slack mrkdwn renders it.
+// ---------------------------------------------------------------------------
+
+func TestConvert_EmojiShortcode(t *testing.T) {
+	mr, blk := Convert("hello :smile: world")
+	want := "hello :smile: world"
+	if mr != want {
+		t.Errorf("mrkdwn = %q, want %q (mrkdwn keeps shortcode literal)", mr, want)
+	}
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	if len(sec.Elements) != 3 {
+		t.Fatalf("got %d elements, want 3 (text, emoji, text); block=%s", len(sec.Elements), blockJSON(blk))
+	}
+	emoji, ok := sec.Elements[1].(*slack.RichTextSectionEmojiElement)
+	if !ok {
+		t.Fatalf("middle element is %T, want *RichTextSectionEmojiElement", sec.Elements[1])
+	}
+	if emoji.Name != "smile" {
+		t.Errorf("emoji name = %q, want %q", emoji.Name, "smile")
+	}
+}
+
+func TestConvert_EmojiShortcodeAllowedChars(t *testing.T) {
+	// Slack shortcodes can contain lowercase letters, digits, +, -, _.
+	// :+1: is the canonical example.
+	_, blk := Convert(":+1: :man-tipping-hand: :slightly_smiling_face:")
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	var names []string
+	for _, el := range sec.Elements {
+		if e, ok := el.(*slack.RichTextSectionEmojiElement); ok {
+			names = append(names, e.Name)
+		}
+	}
+	want := []string{"+1", "man-tipping-hand", "slightly_smiling_face"}
+	if len(names) != len(want) {
+		t.Fatalf("emoji names = %v, want %v; block=%s", names, want, blockJSON(blk))
+	}
+	for i, n := range names {
+		if n != want[i] {
+			t.Errorf("emoji[%d] = %q, want %q", i, n, want[i])
+		}
+	}
+}
+
+func TestConvert_EmojiInsideCodeSpanIsLiteral(t *testing.T) {
+	// `:smile:` inside backticks must NOT be converted to an emoji;
+	// users embed colon-delimited tokens (yaml keys, irc nicks, etc.)
+	// in code spans and expect them to render literally.
+	_, blk := Convert("x `:smile:` y")
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	for _, el := range sec.Elements {
+		if _, ok := el.(*slack.RichTextSectionEmojiElement); ok {
+			t.Fatalf("emoji element emitted inside code span; block=%s", blockJSON(blk))
+		}
+	}
+	// Verify the literal ":smile:" survives as text with Code style.
+	found := false
+	for _, el := range sec.Elements {
+		te, ok := el.(*slack.RichTextSectionTextElement)
+		if !ok {
+			continue
+		}
+		if te.Text == ":smile:" {
+			if te.Style == nil || !te.Style.Code {
+				t.Errorf("text element %q has style %+v, want Code=true", te.Text, te.Style)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("literal ':smile:' text element not found; block=%s", blockJSON(blk))
+	}
+}
+
+func TestConvert_EmojiInsideFencedCodeIsLiteral(t *testing.T) {
+	// Fenced code blocks go through walkCodeBlock which constructs
+	// the text element directly; emoji detection in appendText must
+	// not affect them. Verify the shortcode survives literally.
+	_, blk := Convert("```\nhi :smile:\n```")
+	// Find the preformatted element.
+	var pre *slack.RichTextPreformatted
+	for _, el := range blk.Elements {
+		if p, ok := el.(*slack.RichTextPreformatted); ok {
+			pre = p
+			break
+		}
+	}
+	if pre == nil {
+		t.Fatalf("no preformatted element; block=%s", blockJSON(blk))
+	}
+	for _, el := range pre.Elements {
+		if _, ok := el.(*slack.RichTextSectionEmojiElement); ok {
+			t.Fatalf("emoji element inside fenced code; block=%s", blockJSON(blk))
+		}
+	}
+	// First (and only) element should be a text element containing the shortcode.
+	te, ok := pre.Elements[0].(*slack.RichTextSectionTextElement)
+	if !ok {
+		t.Fatalf("first pre element is %T, want *RichTextSectionTextElement", pre.Elements[0])
+	}
+	if !strings.Contains(te.Text, ":smile:") {
+		t.Errorf("preformatted text = %q, want it to contain ':smile:'", te.Text)
+	}
+}
+
+func TestConvert_EmojiInsideBoldCarriesBoldStyle(t *testing.T) {
+	_, blk := Convert("**:fire:**")
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	for _, el := range sec.Elements {
+		if e, ok := el.(*slack.RichTextSectionEmojiElement); ok {
+			if e.Style == nil || !e.Style.Bold {
+				t.Errorf("emoji style = %+v, want Bold=true", e.Style)
+			}
+			return
+		}
+	}
+	t.Errorf("did not find an emoji element; block=%s", blockJSON(blk))
+}
+
+func TestConvert_ColonWithoutClosingIsNotEmoji(t *testing.T) {
+	// Plain "8:30" and "rsync: error" must NOT be misparsed as
+	// emojis. The regex requires :name: (closing colon present).
+	_, blk := Convert("meeting at 8:30 about rsync: error")
+	sec := blk.Elements[0].(*slack.RichTextSection)
+	for _, el := range sec.Elements {
+		if e, ok := el.(*slack.RichTextSectionEmojiElement); ok {
+			t.Errorf("unexpected emoji element %q; block=%s", e.Name, blockJSON(blk))
+		}
 	}
 }
