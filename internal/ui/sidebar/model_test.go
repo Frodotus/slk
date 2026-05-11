@@ -3,6 +3,8 @@ package sidebar
 import (
 	"strings"
 	"testing"
+
+	"github.com/gammons/slk/internal/ui/messages"
 )
 
 func TestSidebarView(t *testing.T) {
@@ -482,6 +484,118 @@ func TestRender_ReadThreadsRow_DoesNotEmitBoldAfterReset(t *testing.T) {
 	afterReset := prefix[lastResetIdx:]
 	if strings.Contains(afterReset, "\x1b[1m") {
 		t.Errorf("read Threads row unexpectedly emitted bold after reset; afterReset=%q", afterReset)
+	}
+}
+
+// TestRender_ReadDMRow_RestoresMutedFgAfterPrefixReset locks in the
+// bug fix: a read DM with a colored presence prefix (● green for
+// online, ○ grey for away) emits a mid-label ANSI reset right after
+// the prefix glyph. Before the fix, ReapplyBgAfterResets re-injected
+// the BRIGHT SidebarFgANSI() for everything after that reset,
+// overriding ChannelNormal's muted foreground and making read DM
+// names render visibly brighter than read channel names (which have
+// no inline ANSI in their prefix and stay muted via the lipgloss
+// outer wrap).
+//
+// After the fix, the row attrs must re-inject the MUTED foreground
+// (matching ChannelNormal) for the post-prefix span, so read DMs
+// match read channels in brightness.
+func TestRender_ReadDMRow_RestoresMutedFgAfterPrefixReset(t *testing.T) {
+	m := New(nil)
+	m.SetItems([]ChannelItem{
+		{ID: "D1", Name: "alice", Type: "dm", Presence: "active", UnreadCount: 0},
+	})
+	out := m.View(20, 40)
+
+	aliceIdx := strings.Index(out, "alice")
+	if aliceIdx < 0 {
+		t.Fatalf("output missing channel name; got: %q", out)
+	}
+	prefix := out[:aliceIdx]
+	lastResetIdx := strings.LastIndex(prefix, "\x1b[m")
+	if lastResetIdx == -1 {
+		t.Skip("no mid-label reset found before name; render path changed")
+	}
+	afterReset := prefix[lastResetIdx:]
+
+	bright := messages.SidebarFgANSI()
+	muted := messages.SidebarMutedFgANSI()
+	if bright == muted {
+		// Themes where SidebarText == SidebarTextMuted can't exhibit
+		// the bug. The default themes have distinct values, so this
+		// branch only protects against a degenerate test environment.
+		t.Skip("theme has equal SidebarText / SidebarTextMuted; nothing to assert")
+	}
+	if strings.Contains(afterReset, bright) {
+		t.Errorf("read DM row re-injected the BRIGHT SidebarFgANSI after the prefix reset; this is the bug — read DM names render brighter than read channel names.\nbright=%q\nafterReset=%q", bright, afterReset)
+	}
+	if !strings.Contains(afterReset, muted) {
+		t.Errorf("read DM row did not re-inject the muted SidebarMutedFgANSI after the prefix reset; the name will render at the terminal-default foreground.\nmuted=%q\nafterReset=%q", muted, afterReset)
+	}
+}
+
+// TestRender_UnreadDMRow_RestoresBrightFgAfterPrefixReset is the
+// positive case for the same fix: unread rows DO want the bright
+// SidebarFgANSI re-injected after the prefix reset (matching
+// ChannelUnread's bright foreground), so the name pops.
+func TestRender_UnreadDMRow_RestoresBrightFgAfterPrefixReset(t *testing.T) {
+	m := New(nil)
+	m.SetItems([]ChannelItem{
+		{ID: "D1", Name: "alice", Type: "dm", Presence: "active", UnreadCount: 1},
+	})
+	out := m.View(20, 40)
+
+	aliceIdx := strings.Index(out, "alice")
+	if aliceIdx < 0 {
+		t.Fatalf("output missing channel name; got: %q", out)
+	}
+	prefix := out[:aliceIdx]
+	lastResetIdx := strings.LastIndex(prefix, "\x1b[m")
+	if lastResetIdx == -1 {
+		t.Skip("no mid-label reset found before name; render path changed")
+	}
+	afterReset := prefix[lastResetIdx:]
+
+	bright := messages.SidebarFgANSI()
+	muted := messages.SidebarMutedFgANSI()
+	if bright == muted {
+		t.Skip("theme has equal SidebarText / SidebarTextMuted; nothing to assert")
+	}
+	if !strings.Contains(afterReset, bright) {
+		t.Errorf("unread DM row did not re-inject the bright SidebarFgANSI after the prefix reset; the name will render at the terminal-default foreground.\nbright=%q\nafterReset=%q", bright, afterReset)
+	}
+	if strings.Contains(afterReset, muted) {
+		t.Errorf("unread DM row unexpectedly re-injected the muted foreground after the prefix reset\nmuted=%q\nafterReset=%q", muted, afterReset)
+	}
+}
+
+// TestRender_ReadGroupDMRow_RestoresMutedFgAfterPrefixReset:
+// group DMs use the same styled-prefix pattern as 1:1 DMs (a grey
+// PresenceAway-colored "● "), so they hit the same bug. Lock in the
+// muted re-inject for them too.
+func TestRender_ReadGroupDMRow_RestoresMutedFgAfterPrefixReset(t *testing.T) {
+	m := New(nil)
+	m.SetItems([]ChannelItem{
+		{ID: "G1", Name: "design-trio", Type: "group_dm", UnreadCount: 0},
+	})
+	out := m.View(20, 40)
+
+	idx := strings.Index(out, "design-trio")
+	if idx < 0 {
+		t.Fatalf("output missing channel name; got: %q", out)
+	}
+	prefix := out[:idx]
+	lastResetIdx := strings.LastIndex(prefix, "\x1b[m")
+	if lastResetIdx == -1 {
+		t.Skip("no mid-label reset found before name; render path changed")
+	}
+	afterReset := prefix[lastResetIdx:]
+	bright := messages.SidebarFgANSI()
+	if bright == messages.SidebarMutedFgANSI() {
+		t.Skip("theme has equal SidebarText / SidebarTextMuted")
+	}
+	if strings.Contains(afterReset, bright) {
+		t.Errorf("read group_dm re-injected the bright SidebarFgANSI after the prefix reset\nafterReset=%q", afterReset)
 	}
 }
 

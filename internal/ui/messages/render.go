@@ -255,14 +255,16 @@ func ReapplyBgAfterResets(text string, style string) string {
 }
 
 var (
-	cachedBgANSI         string
-	cachedBgColor        color.Color
-	cachedSidebarBgANSI  string
-	cachedSidebarBgColor color.Color
-	cachedFgANSI         string
-	cachedFgColor        color.Color
-	cachedSidebarFgANSI  string
-	cachedSidebarFgColor color.Color
+	cachedBgANSI              string
+	cachedBgColor             color.Color
+	cachedSidebarBgANSI       string
+	cachedSidebarBgColor      color.Color
+	cachedFgANSI              string
+	cachedFgColor             color.Color
+	cachedSidebarFgANSI       string
+	cachedSidebarFgColor      color.Color
+	cachedSidebarMutedFgANSI  string
+	cachedSidebarMutedFgColor color.Color
 
 	// Selection-tint ANSI cache, focused/unfocused. Recomputed when
 	// the underlying SelectionTintColor changes (via Apply()).
@@ -403,6 +405,24 @@ func SidebarFgANSI() string {
 	cachedSidebarFgANSI = fgANSIFor(fg)
 	cachedSidebarFgColor = fg
 	return cachedSidebarFgANSI
+}
+
+// SidebarMutedFgANSI is the muted sidebar foreground escape — the
+// counterpart of SidebarFgANSI for rows styled as ChannelNormal or
+// ChannelMuted. Callers in the sidebar pass this to
+// ReapplyBgAfterResets so the dimmer foreground survives an inline
+// ANSI reset emitted by a styled prefix glyph (DM presence, group_dm,
+// etc.). Without it, the post-reset span falls back to the bright
+// SidebarFgANSI and read rows render visibly brighter than they
+// should.
+func SidebarMutedFgANSI() string {
+	fg := styles.SidebarTextMuted
+	if fg == cachedSidebarMutedFgColor && cachedSidebarMutedFgANSI != "" {
+		return cachedSidebarMutedFgANSI
+	}
+	cachedSidebarMutedFgANSI = fgANSIFor(fg)
+	cachedSidebarMutedFgColor = fg
+	return cachedSidebarMutedFgANSI
 }
 
 // RenderSlackMarkdown converts Slack-flavored markdown and emoji shortcodes

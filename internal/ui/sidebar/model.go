@@ -1206,24 +1206,39 @@ func (m *Model) buildCache(width int) {
 		labelSelected := cursorSelected + prefix + name + " " + unreadDot
 		labelActive := activeBorder + prefix + name + " " + unreadDot
 
-		// Re-apply theme background after ANSI resets from inline styled
-		// glyphs (cursor, prefix, unread dot) so the outer channel style's
-		// background isn't interrupted.
+		// Re-apply theme attrs after ANSI resets emitted by inline styled
+		// glyphs (cursor, prefix, unread dot) so the outer lipgloss
+		// style isn't overwritten for the post-reset span. We need
+		// THREE separate reapply payloads because each label variant
+		// uses a different outer style and therefore a different
+		// foreground:
 		//
-		// Unread rows must also re-emit the bold attribute after every
-		// inline-prefix ANSI reset, otherwise lipgloss's outer
-		// ChannelUnread bold is wiped for the channel name + dot
-		// span that follows the styled prefix glyph.
-		// Bold goes with ChannelUnread; muted rows never go bold even
-		// with unreads (the dimmer ChannelMuted style is the whole
-		// point — bold would defeat it).
-		rowAttrs := bgAnsi
+		//   labelNormal   → ChannelNormal (muted fg) / ChannelUnread
+		//                   (bright fg + bold) / ChannelMuted (muted)
+		//   labelSelected → ChannelSelected (bright fg + bold)
+		//   labelActive   → ChannelSelected (bright fg + bold)
+		//
+		// The loop-invariant `bgAnsi` carries the bright SidebarFgANSI
+		// (suitable for the Selected/Active variants), so we override
+		// the foreground component for labelNormal whenever the row's
+		// base style is muted (read or globally-muted rows). Without
+		// this override, styled DM presence prefixes like green ●
+		// reset the bright sidebar fg back in and the trailing name
+		// renders visibly brighter than read public channels which
+		// have no inline ANSI in their prefix at all.
+		boldAttr := ""
 		if item.UnreadCount > 0 && !item.IsMuted {
-			rowAttrs += "\x1b[1m"
+			boldAttr = "\x1b[1m"
 		}
-		labelNormal = messages.ReapplyBgAfterResets(labelNormal, rowAttrs)
-		labelSelected = messages.ReapplyBgAfterResets(labelSelected, rowAttrs)
-		labelActive = messages.ReapplyBgAfterResets(labelActive, rowAttrs)
+		normalFg := messages.SidebarMutedFgANSI()
+		if item.UnreadCount > 0 && !item.IsMuted {
+			normalFg = messages.SidebarFgANSI()
+		}
+		normalAttrs := messages.SidebarBgANSI() + normalFg + boldAttr
+		selectedAttrs := bgAnsi + boldAttr
+		labelNormal = messages.ReapplyBgAfterResets(labelNormal, normalAttrs)
+		labelSelected = messages.ReapplyBgAfterResets(labelSelected, selectedAttrs)
+		labelActive = messages.ReapplyBgAfterResets(labelActive, selectedAttrs)
 
 		// Pick base style for non-selected state. Muted always wins
 		// over Unread/Normal so muted-with-unreads renders dim, not
