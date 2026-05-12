@@ -241,3 +241,20 @@ func TestBackfill_FiresThreadsListDirtyMsg(t *testing.T) {
 		t.Errorf("TeamID = %s, want T1", dirty.TeamID)
 	}
 }
+
+func TestBackfill_DedupeWindow(t *testing.T) {
+	gate := &dedupeGate{window: 30 * time.Second}
+
+	first := gate.tryStart(time.Unix(1000, 0))
+	if !first {
+		t.Fatal("first call should be allowed")
+	}
+	second := gate.tryStart(time.Unix(1010, 0))
+	if second {
+		t.Error("second call within 30s should be blocked")
+	}
+	third := gate.tryStart(time.Unix(1031, 0))
+	if !third {
+		t.Error("call after window should be allowed")
+	}
+}

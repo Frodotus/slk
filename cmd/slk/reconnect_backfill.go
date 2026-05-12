@@ -274,3 +274,26 @@ func (b *backfiller) run(ctx context.Context) error {
 		b.workspaceID, time.Since(start).Milliseconds())
 	return nil
 }
+
+// dedupeGate enforces a minimum interval between backfill passes.
+// Used by OnConnect so a rapid disconnect/reconnect flap doesn't
+// trigger thundering backfills. Safe for concurrent calls.
+type dedupeGate struct {
+	mu     sync.Mutex
+	last   time.Time
+	window time.Duration
+}
+
+// tryStart reports whether a new backfill pass may begin at `now`. If
+// the previous pass started less than `window` ago, returns false and
+// leaves `last` unchanged. Otherwise records `last = now` and returns
+// true.
+func (g *dedupeGate) tryStart(now time.Time) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.last.IsZero() && now.Sub(g.last) < g.window {
+		return false
+	}
+	g.last = now
+	return true
+}
