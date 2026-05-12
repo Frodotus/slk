@@ -24,6 +24,7 @@ type fakeHistory struct {
 	delay            time.Duration
 	responses        map[string][]*slack.GetConversationHistoryResponse
 	calls            map[string]int
+	oldestSeen       map[string][]string // per-channel: oldest param of each call, in order
 	repliesResponses map[string][]slack.Message // keyed by threadTS
 	repliesCalls     []struct{ Channel, TS string }
 }
@@ -45,6 +46,7 @@ func (f *fakeHistory) GetHistorySince(ctx context.Context, channelID, oldest str
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls[channelID]++
+	f.oldestSeen[channelID] = append(f.oldestSeen[channelID], oldest)
 	resps := f.responses[channelID]
 	if len(resps) == 0 {
 		return nil, nil
@@ -109,7 +111,8 @@ func TestBackfillChannels_FetchesPerChannelSinceSyncedAt(t *testing.T) {
 			"C1": {{Messages: []slack.Message{{Msg: slack.Msg{Timestamp: "150.000000", User: "U2", Text: "new in c1"}}}}},
 			"C2": {{Messages: []slack.Message{{Msg: slack.Msg{Timestamp: "250.000000", User: "U2", Text: "new in c2"}}}}},
 		},
-		calls: map[string]int{},
+		calls:      map[string]int{},
+		oldestSeen: map[string][]string{},
 	}
 
 	bf := newBackfiller(fh, db, "T1", "USELF", nil, 4, 500)
@@ -119,6 +122,12 @@ func TestBackfillChannels_FetchesPerChannelSinceSyncedAt(t *testing.T) {
 
 	if fh.calls["C1"] != 1 || fh.calls["C2"] != 1 {
 		t.Errorf("expected 1 call each for C1 and C2, got %+v", fh.calls)
+	}
+	if got := fh.oldestSeen["C1"]; len(got) != 1 || got[0] != "100.000000" {
+		t.Errorf("C1 oldest = %+v, want [100.000000]", got)
+	}
+	if got := fh.oldestSeen["C2"]; len(got) != 1 || got[0] != "200.000000" {
+		t.Errorf("C2 oldest = %+v, want [200.000000]", got)
 	}
 	// New messages were upserted.
 	if _, err := db.GetMessage("C1", "150.000000"); err != nil {
@@ -143,9 +152,10 @@ func TestBackfillChannels_BoundedConcurrency(t *testing.T) {
 		responses[id] = []*slack.GetConversationHistoryResponse{{}}
 	}
 	fh := &fakeHistory{
-		delay:     50 * time.Millisecond,
-		responses: responses,
-		calls:     map[string]int{},
+		delay:      50 * time.Millisecond,
+		responses:  responses,
+		calls:      map[string]int{},
+		oldestSeen: map[string][]string{},
 	}
 
 	bf := newBackfiller(fh, db, "T1", "USELF", nil, 4, 500)
@@ -184,7 +194,8 @@ func TestBackfillThreads_FetchesRepliesForInvolvedThreads(t *testing.T) {
 				{Msg: slack.Msg{Timestamp: "250.000000", User: "U3", Text: "reply on other", ThreadTimestamp: "200.000000"}},
 			}}},
 		},
-		calls: map[string]int{},
+		calls:      map[string]int{},
+		oldestSeen: map[string][]string{},
 		repliesResponses: map[string][]slack.Message{
 			"100.000000": {
 				{Msg: slack.Msg{Timestamp: "100.000000", User: "USELF", Text: "self parent", ThreadTimestamp: "100.000000"}},
@@ -219,7 +230,8 @@ func TestBackfill_FiresThreadsListDirtyMsg(t *testing.T) {
 		responses: map[string][]*slack.GetConversationHistoryResponse{
 			"C1": {{}},
 		},
-		calls: map[string]int{},
+		calls:      map[string]int{},
+		oldestSeen: map[string][]string{},
 	}
 
 	captured := &captureSender{}
