@@ -194,6 +194,14 @@ func (m *Model) Focused() bool { return m.focused }
 // selected (channelID, threadTS) pair is still present in the new list, the
 // selection follows it to its new position; otherwise the selection resets
 // to the top.
+// SetSubscriptionsAvailable records whether Slack's
+// subscription-state API is currently reachable. The banner the View
+// renders when false is wired in Task 10; for now this is a
+// no-op stub so callers compile.
+func (m *Model) SetSubscriptionsAvailable(available bool) {
+	// no-op (banner rendering implemented in Task 10)
+}
+
 func (m *Model) SetSummaries(s []cache.ThreadSummary) {
 	prevCh, prevTS, hadSel := m.selectedKey()
 	m.summaries = s
