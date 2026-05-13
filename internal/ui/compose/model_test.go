@@ -944,3 +944,49 @@ func TestView_UnfocusedDoesNotUseComposeInsertBackground(t *testing.T) {
 			expected, out)
 	}
 }
+
+// TestVisualLineCount_CursorOverflowAtExactWrapWidth captures the
+// off-by-one wrap bug: when the user types exactly enough characters
+// to fill a line at the textarea's wrap width, the textarea places
+// the cursor at column W (one past the visible right edge) and
+// internally moves it to (line 2, col 0). autoGrow must therefore
+// grow the textarea to 2 visible lines, otherwise the height-1
+// viewport scrolls to follow the cursor and shows the empty line 2
+// instead of the filled line 1. visualLineCount drives autoGrow, so
+// it must report 2 lines when the content width is exactly the wrap
+// width (a multiple of the wrap width counts as "cursor on next line").
+func TestVisualLineCount_CursorOverflowAtExactWrapWidth(t *testing.T) {
+	m := New("test")
+	// Pick a SetWidth where the textarea's inner wrap width is a known
+	// small number so we can construct a fill-the-line value exactly.
+	m.SetWidth(25) // current SetWidth: textarea wrap is panelW-5 = 20
+	w := m.input.Width()
+	if w <= 0 {
+		t.Fatalf("textarea width=%d; expected >0", w)
+	}
+	m.SetValue(strings.Repeat("a", w))
+	if got := m.visualLineCount(); got < 2 {
+		t.Errorf("visualLineCount with content exactly filling wrap width (%d chars at width %d) = %d, want >=2 (cursor overflows to next line)", w, w, got)
+	}
+}
+
+// TestSetWidthReservesBackgroundMargin asserts the textarea's wrap
+// width is intentionally 2 cols narrower than the visible content
+// area inside the compose box. The textarea uses Inline(true) styles
+// that don't paint bg behind trailing whitespace; the 2-col margin
+// gives View()'s lipgloss content wrapper (Width(width-3)) room to
+// pad+paint the trailing cells so the compose box's background flows
+// cleanly all the way to the inner-right padding. Tightening this
+// margin re-introduces a visible "background not filling the box"
+// regression on the right edge.
+func TestSetWidthReservesBackgroundMargin(t *testing.T) {
+	m := New("test")
+	for _, panelW := range []int{20, 30, 60, 80} {
+		m.SetWidth(panelW)
+		got := m.input.Width()
+		want := panelW - 5 // visible content (panelW - 3) minus a 2-col bg-padding margin
+		if got != want {
+			t.Errorf("SetWidth(%d): textarea inner width = %d, want %d (visible_content(panelW-3) - margin(2))", panelW, got, want)
+		}
+	}
+}

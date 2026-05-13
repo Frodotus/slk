@@ -310,6 +310,17 @@ func (m *Model) Reset() {
 
 // visualLineCount returns the number of visual lines the text occupies,
 // accounting for soft wraps when a line exceeds the textarea width.
+//
+// When a logical line's width is an EXACT multiple of the wrap width
+// AND the cursor lands at the very end (the common case during
+// typing), the textarea moves the cursor to the start of a new line
+// — its height-tracking treats that overflow as occupying an extra
+// visual row. We mirror that here so autoGrow expands the visible
+// height in lockstep. Without this, typing the wrap-width-th character
+// leaves the textarea at height 1 with the cursor on a logical line 2
+// that's blank in the viewport — the user sees their content vanish
+// for one keystroke until the next keystroke pushes the count past
+// the boundary.
 func (m Model) visualLineCount() int {
 	val := m.input.Value()
 	if val == "" {
@@ -319,14 +330,24 @@ func (m Model) visualLineCount() int {
 	if w <= 0 {
 		return m.input.LineCount()
 	}
+	lines := strings.Split(val, "\n")
 	total := 0
-	for _, line := range strings.Split(val, "\n") {
+	for i, line := range lines {
 		lineWidth := lipgloss.Width(line)
 		if lineWidth == 0 {
 			total++
-		} else {
-			total += (lineWidth + w - 1) / w // ceiling division
+			continue
 		}
+		wrapped := (lineWidth + w - 1) / w // ceiling division
+		// On the LAST logical line, a content width that is an exact
+		// non-zero multiple of w means the next typed character lands
+		// at column 0 of an additional visual row. Pre-grow the
+		// height by one so the textarea's height-1 viewport doesn't
+		// scroll to follow the cursor off-screen.
+		if i == len(lines)-1 && lineWidth%w == 0 {
+			wrapped++
+		}
+		total += wrapped
 	}
 	if total < 1 {
 		total = 1
@@ -335,8 +356,19 @@ func (m Model) visualLineCount() int {
 }
 
 // SetWidth updates the textarea's internal width so text wraps correctly.
+//
+// We deliberately wrap at `width - 5` rather than the strict content
+// area (`width - 3`: border 1 + padding 2). The textarea's own line
+// style uses Inline(true), so its bg paint covers only the chars
+// behind text — trailing whitespace inside the textarea has no bg.
+// View() wraps the textarea output in a lipgloss content style with
+// Width(width-3) and Background(innerBG); the extra 2 cols beyond the
+// textarea's width let that wrapper paint the trailing edge with the
+// compose box's background so the bg flows cleanly to the inner-right
+// padding. Without the 2-col margin, the right edge of the textarea
+// shows the outer panel's background through.
 func (m *Model) SetWidth(width int) {
-	innerWidth := width - 5 // account for left border + left/right padding
+	innerWidth := width - 5 // textarea wrap, intentionally 2 cols narrower than the visible content area
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
