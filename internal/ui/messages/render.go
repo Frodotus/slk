@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -15,20 +16,24 @@ import (
 )
 
 var (
-	// Slack formatting patterns
+	// Slack formatting patterns. italic is NOT a regex because Go's
+	// RE2 doesn't support lookahead/lookbehind, and the correct
+	// "intra-word `_` is literal" rule needs to know what's on either
+	// side of the delimiter. See renderItalics below.
 	boldRe          = regexp.MustCompile(`\*([^*\n]+)\*`)
-	italicRe        = regexp.MustCompile(`_([^_\n]+)_`)
 	strikethroughRe = regexp.MustCompile(`~([^~\n]+)~`)
 	inlineCodeRe    = regexp.MustCompile("`([^`\n]+)`")
 	codeBlockRe     = regexp.MustCompile("(?s)```(.+?)```")
 
 	// Slack link patterns: <url|label> or <url>.
-	// linkWithLabelRe requires https?:// so it does NOT match channel
-	// mentions <#CHANNEL_ID|name>, group mentions <!subteam^...|@team>,
-	// or other Slack-internal angle-bracket forms. Those are handled by
+	// linkWithLabelRe matches both http(s) URLs and mailto: addresses
+	// (Slack auto-linkifies typed emails into <mailto:X|X> form). The
+	// scheme restriction means we do NOT match channel mentions
+	// <#CHANNEL_ID|name>, group mentions <!subteam^...|@team>, or
+	// other Slack-internal angle-bracket forms — those are handled by
 	// dedicated regexes below.
-	linkWithLabelRe = regexp.MustCompile(`<(https?://[^|>]+)\|([^>]+)>`)
-	linkBareRe      = regexp.MustCompile(`<(https?://[^>]+)>`)
+	linkWithLabelRe = regexp.MustCompile(`<((?:https?://|mailto:)[^|>]+)\|([^>]+)>`)
+	linkBareRe      = regexp.MustCompile(`<((?:https?://|mailto:)[^>]+)>`)
 
 	// Slack user/channel mentions: <@U1234> <#C1234|channel-name>
 	userMentionRe = regexp.MustCompile(`<@([A-Z0-9]+)>`)
@@ -117,7 +122,8 @@ func blockquoteStyle() lipgloss.Style {
 // already-long URL pushed message lines past the panel width.
 //
 // Output format per attachment:
-//   [Image] https://files.slack.com/...
+//
+//	[Image] https://files.slack.com/...
 //
 // Callers must pass the result through WordWrap before composing it into
 // a width-bounded layout, since file URLs frequently exceed the panel
@@ -484,11 +490,13 @@ func renderInlineFormatting(text string, userNames map[string]string, channelNam
 		return boldStyle().Render(inner)
 	})
 
-	// Italic
-	text = italicRe.ReplaceAllStringFunc(text, func(match string) string {
-		inner := italicRe.FindStringSubmatch(match)[1]
-		return italicStyle().Render(inner)
-	})
+	// Italic — manual scan so intra-word underscores (e.g.,
+	// `is_unpaid_yes`, `hello_world_foo`) stay literal, per
+	// CommonMark's intraword-underscore rule. The previous regex
+	// `_X_` matched any pair of underscores, italicizing identifiers
+	// that contain a `_` and stripping the underscores from the
+	// visible output.
+	text = renderItalics(text)
 
 	// Strikethrough
 	text = strikethroughRe.ReplaceAllStringFunc(text, func(match string) string {
@@ -508,9 +516,13 @@ func renderInlineFormatting(text string, userNames map[string]string, channelNam
 	})
 
 	// Bare links: <url> -> url, wrapped in OSC 8 so it's clickable.
+	// For mailto: URLs the visible text drops the scheme prefix so the
+	// user sees just the email address; the OSC 8 target keeps the
+	// mailto: scheme so terminal click-handlers can open a mail client.
 	text = linkBareRe.ReplaceAllStringFunc(text, func(match string) string {
 		url := linkBareRe.FindStringSubmatch(match)[1]
-		return osc8Hyperlink(url, linkStyle().Render(url))
+		visible := strings.TrimPrefix(url, "mailto:")
+		return osc8Hyperlink(url, linkStyle().Render(visible))
 	})
 
 	// Channel mentions: <#C1234|channel-name> -> #channel-name, or
@@ -553,6 +565,73 @@ func renderInlineFormatting(text string, userNames map[string]string, channelNam
 	text = emoji.Sprint(emojiutil.StripSkinToneFromText(text))
 
 	return text
+}
+
+// renderItalics wraps `_X_` runs in italicStyle when the surrounding
+// `_` characters sit at word boundaries — start/end of text, or
+// adjacent to a non-word rune (whitespace, punctuation, ANSI escape
+// bytes, …). Intra-word `_` (alphanumeric on BOTH sides) is left
+// literal, matching CommonMark's underscore-emphasis rule and the
+// behavior of Slack's own web/mobile clients.
+//
+// We scan rune-by-rune so multi-byte UTF-8 (e.g. accented letters as
+// word chars) is handled correctly. The body of an italic run may
+// contain any rune except `_` and `\n`, matching the legacy regex.
+func renderItalics(text string) string {
+	if !strings.ContainsRune(text, '_') {
+		return text
+	}
+	runes := []rune(text)
+	var b strings.Builder
+	b.Grow(len(text))
+	i := 0
+	for i < len(runes) {
+		if runes[i] != '_' {
+			b.WriteRune(runes[i])
+			i++
+			continue
+		}
+		// Candidate opener at position i. The `_` opens emphasis only
+		// when the preceding rune is start-of-text or a non-word rune.
+		if i > 0 && isItalicWordRune(runes[i-1]) {
+			b.WriteRune(runes[i])
+			i++
+			continue
+		}
+		// Find a candidate closing `_` within the same logical line.
+		j := i + 1
+		for j < len(runes) && runes[j] != '_' && runes[j] != '\n' {
+			j++
+		}
+		if j >= len(runes) || runes[j] != '_' || j == i+1 {
+			// No close, or empty body (`__`): not italic, emit `_` literally.
+			b.WriteRune(runes[i])
+			i++
+			continue
+		}
+		// The closing `_` only counts when the FOLLOWING rune is
+		// end-of-text or a non-word rune.
+		if j+1 < len(runes) && isItalicWordRune(runes[j+1]) {
+			b.WriteRune(runes[i])
+			i++
+			continue
+		}
+		inner := string(runes[i+1 : j])
+		b.WriteString(italicStyle().Render(inner))
+		i = j + 1
+	}
+	return b.String()
+}
+
+// isItalicWordRune reports whether r counts as a "word" rune for
+// CommonMark's intra-word underscore rule: letters, digits, and `_`
+// itself. Anything else (whitespace, punctuation, ANSI control bytes,
+// emoji glyphs) acts as a boundary.
+func isItalicWordRune(r rune) bool {
+	if r == '_' {
+		return true
+	}
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // plainLine pairs an ANSI-stripped line with a column→byte index. Bytes

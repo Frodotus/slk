@@ -83,8 +83,13 @@ var (
 	channelMentionRe = regexp.MustCompile(`<#[A-Z0-9]+\|([^>]+)>`)
 	subteamMentionRe = regexp.MustCompile(`<!subteam\^[A-Z0-9]+\|([^>]+)>`)
 	broadcastRe      = regexp.MustCompile(`<!(here|channel|everyone)>`)
-	linkWithLabelRe  = regexp.MustCompile(`<(https?://[^|>]+)\|([^>]+)>`)
-	linkBareRe       = regexp.MustCompile(`<(https?://[^>]+)>`)
+	// Match both http(s) URLs and mailto: addresses; Slack
+	// auto-linkifies typed emails into <mailto:X|X>. Bare-link
+	// substitution keeps the URL as-is for http(s) but strips the
+	// mailto: prefix so the notification body reads as just the
+	// address — see StripSlackMarkup below.
+	linkWithLabelRe = regexp.MustCompile(`<((?:https?://|mailto:)[^|>]+)\|([^>]+)>`)
+	linkBareRe      = regexp.MustCompile(`<((?:https?://|mailto:)[^>]+)>`)
 )
 
 // StripSlackMarkup converts Slack-formatted text to plain text suitable for
@@ -94,7 +99,12 @@ var (
 func StripSlackMarkup(text string, userNames map[string]string) string {
 	text = channelMentionRe.ReplaceAllString(text, "#$1")
 	text = linkWithLabelRe.ReplaceAllString(text, "$2")
-	text = linkBareRe.ReplaceAllString(text, "$1")
+	// Bare links: drop the mailto: scheme so notification bodies read
+	// as just the address; http(s) URLs are kept whole.
+	text = linkBareRe.ReplaceAllStringFunc(text, func(match string) string {
+		url := linkBareRe.FindStringSubmatch(match)[1]
+		return strings.TrimPrefix(url, "mailto:")
+	})
 	text = subteamMentionRe.ReplaceAllString(text, "$1")
 	text = broadcastRe.ReplaceAllString(text, "@$1")
 	text = userMentionRe.ReplaceAllStringFunc(text, func(match string) string {

@@ -45,6 +45,115 @@ func TestBareLinkOSC8(t *testing.T) {
 	}
 }
 
+// TestIntraWordUnderscoreNotItalicized captures the bug where the
+// receive-side italic regex `_X_` mistakenly italicizes intra-word
+// underscores like is_unpaid_yes, stripping the underscores. Per
+// CommonMark, an underscore between two word characters is literal
+// and must NOT open or close emphasis. The fix only italicizes when
+// the surrounding chars are non-word (whitespace, punctuation, or
+// start/end of text).
+func TestIntraWordUnderscoreNotItalicized(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string // ANSI-stripped plain text
+	}{
+		{"intraword two underscores", "the is_unpaid_yes flag", "the is_unpaid_yes flag"},
+		{"intraword three underscores", "hello_world_foo_bar", "hello_world_foo_bar"},
+		{"snake_case identifier", "is_unpaid", "is_unpaid"},
+		{"two-underscore identifier", "foo_bar_baz", "foo_bar_baz"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := RenderSlackMarkdown(tc.in, nil, nil)
+			plain := ansi.Strip(out)
+			if plain != tc.want {
+				t.Errorf("RenderSlackMarkdown(%q) plain = %q, want %q", tc.in, plain, tc.want)
+			}
+		})
+	}
+}
+
+// TestItalicPreservedAtWordBoundaries guards that the word-boundary
+// fix doesn't regress the actual italic syntax — _X_ at the start of
+// a token (whitespace or start-of-string on the left, whitespace or
+// end-of-string on the right) must still render italic and strip the
+// surrounding underscores.
+func TestItalicPreservedAtWordBoundaries(t *testing.T) {
+	cases := []struct {
+		name       string
+		in         string
+		wantPlain  string
+		wantItalic bool
+	}{
+		{"standalone italic", "_emphasized_", "emphasized", true},
+		{"italic at start of sentence", "_hello_ world", "hello world", true},
+		{"italic at end of sentence", "say _hello_", "say hello", true},
+		{"italic mid-sentence", "say _hello_ now", "say hello now", true},
+		{"multi-word italic", "_hello world_", "hello world", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := RenderSlackMarkdown(tc.in, nil, nil)
+			plain := ansi.Strip(out)
+			if plain != tc.wantPlain {
+				t.Errorf("RenderSlackMarkdown(%q) plain = %q, want %q", tc.in, plain, tc.wantPlain)
+			}
+			// Italic SGR is "\x1b[3" — check for it in the raw output.
+			hasItalic := strings.Contains(out, "\x1b[3")
+			if hasItalic != tc.wantItalic {
+				t.Errorf("RenderSlackMarkdown(%q) hasItalic = %v, want %v\nraw=%q", tc.in, hasItalic, tc.wantItalic, out)
+			}
+		})
+	}
+}
+
+// TestLabeledMailtoLinkRendersJustEmail asserts that Slack's wire form
+// for an emailed link — <mailto:user@host|user@host> — renders as just
+// the email address, not the literal angle-bracket text. Slack
+// auto-linkifies typed emails on every message body that goes through
+// the rich_text -> markdown round-trip, so this form arrives often.
+func TestLabeledMailtoLinkRendersJustEmail(t *testing.T) {
+	in := "ping <mailto:gammons@gmail.com|gammons@gmail.com> when ready"
+	out := RenderSlackMarkdown(in, nil, nil)
+	plain := ansi.Strip(out)
+
+	if !strings.Contains(plain, "gammons@gmail.com") {
+		t.Errorf("expected email in plain output, got %q", plain)
+	}
+	if strings.Contains(plain, "<mailto:") {
+		t.Errorf("did not expect raw <mailto:...> in plain output, got %q", plain)
+	}
+	if strings.Contains(plain, "|") {
+		t.Errorf("did not expect the label separator '|' in plain output, got %q", plain)
+	}
+	// OSC 8 hyperlink should still wrap the email so it's clickable in
+	// terminals that handle mailto: links.
+	if !strings.Contains(out, "\x1b]8;;mailto:gammons@gmail.com") {
+		t.Error("expected OSC 8 hyperlink escape with the mailto: target")
+	}
+}
+
+// TestBareMailtoLinkRendersJustEmail asserts that the unlabeled wire
+// form <mailto:user@host> (some clients emit it) renders as just the
+// email, with the mailto: prefix stripped from the visible text but
+// preserved in the OSC 8 hyperlink target.
+func TestBareMailtoLinkRendersJustEmail(t *testing.T) {
+	in := "contact <mailto:gammons@gmail.com>"
+	out := RenderSlackMarkdown(in, nil, nil)
+	plain := ansi.Strip(out)
+
+	if !strings.Contains(plain, "gammons@gmail.com") {
+		t.Errorf("expected email in plain output, got %q", plain)
+	}
+	if strings.Contains(plain, "mailto:") {
+		t.Errorf("did not expect 'mailto:' in plain (visible) output, got %q", plain)
+	}
+	if !strings.Contains(out, "\x1b]8;;mailto:gammons@gmail.com") {
+		t.Error("expected OSC 8 hyperlink escape with the mailto: target")
+	}
+}
+
 // TestChannelMentionStillRendersWithHash guards against the regex-ordering
 // regression noted in render.go: linkWithLabelRe must not consume
 // <#CHANNEL_ID|name> and reduce it to just "name". We tighten it to require

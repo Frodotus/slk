@@ -145,6 +145,8 @@ func TestStripSlackMarkup(t *testing.T) {
 		{"channel mention", "see <#C123|general>", "see #general"},
 		{"link with label", "visit <https://example.com|Example>", "visit Example"},
 		{"bare link", "visit <https://example.com>", "visit https://example.com"},
+		{"labeled mailto link", "ping <mailto:foo@bar.com|foo@bar.com>", "ping foo@bar.com"},
+		{"bare mailto link", "email <mailto:foo@bar.com>", "email foo@bar.com"},
 		{"broadcast here", "<!here> heads up", "@here heads up"},
 		{"broadcast channel", "<!channel> heads up", "@channel heads up"},
 		{"broadcast everyone", "<!everyone> heads up", "@everyone heads up"},
