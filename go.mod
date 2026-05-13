@@ -64,5 +64,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/clipperhouse/displaywidth => github.com/gammons/displaywidth v0.11.1-0.20260428124126-4f10f3979a7e

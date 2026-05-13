@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/clipperhouse/displaywidth"
 	emojilib "github.com/kyokomi/emoji/v2"
 	"golang.org/x/term"
 )
@@ -109,7 +108,15 @@ func initWithIO(opts InitOptions, out io.Writer, in io.Reader) (bool, bool, erro
 		if c, err := LoadCache(cachePath); err == nil {
 			if c.Version == CacheVersion && c.CodemapHash == wantHash {
 				setWidthMap(c.Widths)
-				displaywidth.SetExternalWidths(c.Widths)
+				// NOTE: previously we also called
+				// displaywidth.SetExternalWidths(c.Widths) to inject
+				// probed widths into lipgloss's transitive displaywidth
+				// table. That API only exists in our fork; we dropped
+				// the `replace` directive (issue #7) so `go install`
+				// works against upstream displaywidth. Result: slk's
+				// own Width() uses probed values, but lipgloss-rendered
+				// text falls back to displaywidth's static table for a
+				// small set of complex emoji.
 				return true, false, nil
 			}
 		}
@@ -130,7 +137,7 @@ func initWithIO(opts InitOptions, out io.Writer, in io.Reader) (bool, bool, erro
 	}
 
 	setWidthMap(widths)
-	displaywidth.SetExternalWidths(widths)
+	// See note above re: SetExternalWidths and issue #7.
 
 	// Write cache (best effort; failure is silently ignored — the probe
 	// will simply re-run on next launch).
