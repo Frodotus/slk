@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ type fakeHistory struct {
 	maxInFlight      int32
 	delay            time.Duration
 	responses        map[string][]*slack.GetConversationHistoryResponse
+	history          map[string][]slack.Message // alternate flat input: channelID → messages
 	calls            map[string]int
 	oldestSeen       map[string][]string // per-channel: oldest param of each call, in order
 	repliesResponses map[string][]slack.Message // keyed by threadTS
@@ -48,8 +50,12 @@ func (f *fakeHistory) ListThreadSubscriptions(ctx context.Context) ([]slackclien
 }
 
 // GetHistorySince satisfies historyFetcher. It looks up the per-channel
-// response queue, returns its head, and records the call.
-func (f *fakeHistory) GetHistorySince(ctx context.Context, channelID, oldest string, maxTotal int) ([]slack.Message, error) {
+// response queue (f.responses) and returns its head; if responses is
+// empty for the channel, falls back to f.history (a simpler flat map
+// of channelID → []slack.Message) so tests can use whichever shape is
+// more convenient. Capped is true when the returned slice was
+// truncated by maxTotal or when the queued response had HasMore set.
+func (f *fakeHistory) GetHistorySince(ctx context.Context, channelID, oldest string, maxTotal int) (slackclient.HistorySinceResult, error) {
 	cur := atomic.AddInt32(&f.inFlight, 1)
 	defer atomic.AddInt32(&f.inFlight, -1)
 	for {
@@ -63,15 +69,30 @@ func (f *fakeHistory) GetHistorySince(ctx context.Context, channelID, oldest str
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls[channelID]++
-	f.oldestSeen[channelID] = append(f.oldestSeen[channelID], oldest)
-	resps := f.responses[channelID]
-	if len(resps) == 0 {
-		return nil, nil
+	if f.calls != nil {
+		f.calls[channelID]++
 	}
-	resp := resps[0]
-	f.responses[channelID] = resps[1:]
-	return resp.Messages, nil
+	if f.oldestSeen != nil {
+		f.oldestSeen[channelID] = append(f.oldestSeen[channelID], oldest)
+	}
+	if resps := f.responses[channelID]; len(resps) > 0 {
+		resp := resps[0]
+		f.responses[channelID] = resps[1:]
+		msgs := resp.Messages
+		capped := resp.HasMore
+		if maxTotal > 0 && len(msgs) > maxTotal {
+			msgs = msgs[:maxTotal]
+			capped = true
+		}
+		return slackclient.HistorySinceResult{Messages: msgs, Capped: capped}, nil
+	}
+	msgs := f.history[channelID]
+	capped := false
+	if maxTotal > 0 && len(msgs) > maxTotal {
+		msgs = msgs[:maxTotal]
+		capped = true
+	}
+	return slackclient.HistorySinceResult{Messages: msgs, Capped: capped}, nil
 }
 
 // GetReplies satisfies historyFetcher. Records the call and returns
@@ -116,13 +137,22 @@ func newTestDB(t *testing.T) *cache.DB {
 func TestBackfillChannels_FetchesPerChannelSinceSyncedAt(t *testing.T) {
 	db := newTestDB(t)
 
-	// Two channels with cached messages and synced_at.
+	// Two channels with cached messages and a watermark set. The
+	// backfiller now derives `oldest` from latest_synced_ts (via
+	// GetChannelWatermark), not from synced_at — so set both, but the
+	// per-channel ts watermark is what should reach the API call.
 	db.UpsertChannel(cache.Channel{ID: "C1", WorkspaceID: "T1", Name: "a", Type: "channel"})
 	db.UpsertChannel(cache.Channel{ID: "C2", WorkspaceID: "T1", Name: "b", Type: "channel"})
 	db.UpsertMessage(cache.Message{TS: "10.000000", ChannelID: "C1", WorkspaceID: "T1", UserID: "U1", Text: "old"})
 	db.UpsertMessage(cache.Message{TS: "20.000000", ChannelID: "C2", WorkspaceID: "T1", UserID: "U1", Text: "old"})
 	db.SetChannelSyncedAt("C1", 100)
 	db.SetChannelSyncedAt("C2", 200)
+	if err := db.SetChannelLatestSyncedTS("C1", "100.000000"); err != nil {
+		t.Fatalf("SetChannelLatestSyncedTS C1: %v", err)
+	}
+	if err := db.SetChannelLatestSyncedTS("C2", "200.000000"); err != nil {
+		t.Fatalf("SetChannelLatestSyncedTS C2: %v", err)
+	}
 
 	fh := &fakeHistory{
 		responses: map[string][]*slack.GetConversationHistoryResponse{
@@ -435,4 +465,100 @@ func TestBackfillSubscriptions_SuccessTriggersAvailabilityCallback(t *testing.T)
 	if len(calls) != 1 || calls[0] != true {
 		t.Fatalf("expected one callback with available=true, got %v", calls)
 	}
+}
+
+// TestBackfill_CapHit_DoesNotAdvanceWatermark verifies the
+// silent-message-drop fix: when GetHistorySince returns Capped=true,
+// the backfiller must NOT advance latest_synced_ts. If it did, the
+// un-fetched (oldest, capped-batch-max-ts) window would be silently
+// skipped on the next reconnect.
+func TestBackfill_CapHit_DoesNotAdvanceWatermark(t *testing.T) {
+	db := newTestDB(t)
+
+	if err := db.UpsertChannel(cache.Channel{ID: "C1", WorkspaceID: "T1", Name: "busy", Type: "channel", IsMember: true}); err != nil {
+		t.Fatalf("upsert channel: %v", err)
+	}
+	if err := db.SetChannelLatestSyncedTS("C1", "1700000000.000000"); err != nil {
+		t.Fatalf("set watermark: %v", err)
+	}
+	// Pre-existing message so the channel appears in ChannelsWithMessages.
+	if err := db.UpsertMessage(cache.Message{
+		TS: "1700000000.000000", ChannelID: "C1", WorkspaceID: "T1",
+		UserID: "U1", Text: "anchor", CreatedAt: 1700000000,
+	}); err != nil {
+		t.Fatalf("upsert anchor: %v", err)
+	}
+
+	// Fake returns 10 messages but cap is 5 → Capped == true.
+	fh := &fakeHistory{
+		history: map[string][]slack.Message{
+			"C1": makeBackfillMessages("1700001000", 10),
+		},
+	}
+
+	bf := newBackfiller(fh, db, "T1", "U_ME", nil, 1 /*conc*/, 5 /*cap*/, nil)
+	if err := bf.run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got := db.GetChannelLatestSyncedTS("C1")
+	if got != "1700000000.000000" {
+		t.Errorf("watermark advanced despite cap: got %q want %q", got, "1700000000.000000")
+	}
+}
+
+// TestBackfill_FullFetch_AdvancesWatermarkToMaxTS verifies the
+// happy-path: when GetHistorySince returns all available messages
+// (Capped=false), the backfiller advances latest_synced_ts to the
+// highest ts in the batch so subsequent reconnects start fetching
+// from that point forward.
+func TestBackfill_FullFetch_AdvancesWatermarkToMaxTS(t *testing.T) {
+	db := newTestDB(t)
+
+	if err := db.UpsertChannel(cache.Channel{ID: "C1", WorkspaceID: "T1", Name: "quiet", Type: "channel", IsMember: true}); err != nil {
+		t.Fatalf("upsert channel: %v", err)
+	}
+	if err := db.SetChannelLatestSyncedTS("C1", "1700000000.000000"); err != nil {
+		t.Fatalf("set watermark: %v", err)
+	}
+	if err := db.UpsertMessage(cache.Message{
+		TS: "1700000000.000000", ChannelID: "C1", WorkspaceID: "T1",
+		UserID: "U1", Text: "anchor", CreatedAt: 1700000000,
+	}); err != nil {
+		t.Fatalf("upsert anchor: %v", err)
+	}
+
+	// 3 messages, cap is 10 → Capped == false. Highest ts is .000002.
+	fh := &fakeHistory{
+		history: map[string][]slack.Message{
+			"C1": makeBackfillMessages("1700001000", 3),
+		},
+	}
+
+	bf := newBackfiller(fh, db, "T1", "U_ME", nil, 1, 10, nil)
+	if err := bf.run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got := db.GetChannelLatestSyncedTS("C1")
+	want := "1700001000.000002"
+	if got != want {
+		t.Errorf("watermark not advanced to MAX(ts): got %q want %q", got, want)
+	}
+}
+
+// makeBackfillMessages returns n messages with monotonically
+// increasing ts starting from base. Each ts is base + ".000NNN" so
+// they sort correctly as Slack ts strings under lexicographic compare.
+func makeBackfillMessages(base string, n int) []slack.Message {
+	out := make([]slack.Message, n)
+	for i := 0; i < n; i++ {
+		out[i] = slack.Message{Msg: slack.Msg{
+			Type:      "message",
+			Timestamp: fmt.Sprintf("%s.%06d", base, i),
+			User:      "U1",
+			Text:      fmt.Sprintf("msg %d", i),
+		}}
+	}
+	return out
 }

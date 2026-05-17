@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"strconv"
+	"fmt"
 	"sync"
 	"time"
 
@@ -22,7 +22,7 @@ import (
 // by its sole consumer. *slackclient.Client implicitly satisfies
 // this interface.
 type historyFetcher interface {
-	GetHistorySince(ctx context.Context, channelID, oldest string, maxTotal int) ([]slack.Message, error)
+	GetHistorySince(ctx context.Context, channelID, oldest string, maxTotal int) (slackclient.HistorySinceResult, error)
 	GetReplies(ctx context.Context, channelID, threadTS string) ([]slack.Message, error)
 	ListThreadSubscriptions(ctx context.Context) ([]slackclient.ThreadSubscriptionView, error)
 }
@@ -144,19 +144,30 @@ func (b *backfiller) runChannelPhase(ctx context.Context) error {
 // upserts every returned message. Returns the count of upserted
 // messages. Records thread_ts of any returned thread-reply messages
 // into b.discoveredThreads.
+//
+// Watermark advancement rule: latest_synced_ts is advanced to the
+// highest ts in the fetched batch ONLY when the batch was not capped
+// (i.e., we know we got every message in (oldest, now]). If the cap
+// was hit, the watermark is left untouched so the next reconnect
+// re-fetches the missed range. The wall-clock synced_at is bumped
+// either way for UI cache-freshness display.
 func (b *backfiller) backfillOneChannel(ctx context.Context, row cache.ChannelSyncRow) (int, error) {
-	oldest := ""
-	if row.SyncedAt > 0 {
-		oldest = strconv.FormatInt(row.SyncedAt, 10) + ".000000"
+	// Resolve the watermark: explicit latest_synced_ts wins over
+	// MAX(ts) fallback. Empty string means "first sync — just fetch
+	// the latest page."
+	oldest, err := b.db.GetChannelWatermark(row.ChannelID)
+	if err != nil {
+		return 0, fmt.Errorf("watermark for %s: %w", row.ChannelID, err)
 	}
 	start := time.Now()
 
-	msgs, err := b.client.GetHistorySince(ctx, row.ChannelID, oldest, b.perChannelCap)
+	res, err := b.client.GetHistorySince(ctx, row.ChannelID, oldest, b.perChannelCap)
 	if err != nil {
 		return 0, err
 	}
 
-	for _, m := range msgs {
+	var maxTS string
+	for _, m := range res.Messages {
 		raw, _ := json.Marshal(m)
 		b.db.UpsertMessage(cache.Message{
 			TS:          m.Timestamp,
@@ -170,25 +181,37 @@ func (b *backfiller) backfillOneChannel(ctx context.Context, row cache.ChannelSy
 			RawJSON:     string(raw),
 			CreatedAt:   time.Now().Unix(),
 		})
+		if m.Timestamp > maxTS {
+			maxTS = m.Timestamp
+		}
 		if m.ThreadTimestamp != "" {
 			b.mu.Lock()
 			b.discoveredThreads[threadKey{ChannelID: row.ChannelID, ThreadTS: m.ThreadTimestamp}] = struct{}{}
 			b.mu.Unlock()
 		}
 	}
-	// Bump synced_at once after the batch completes. Done even when
-	// zero messages came back so a quiet channel still gets its
-	// "last looked at" stamp refreshed and the next reconnect window
-	// stays small.
+
+	// Wall-clock freshness bump (unchanged behavior). The UI uses
+	// this to decide whether to spin or show the cache.
 	b.db.SetChannelSyncedAt(row.ChannelID, time.Now().Unix())
 
-	capped := ""
-	if len(msgs) >= b.perChannelCap {
-		capped = " capped=true"
+	// Watermark advance: only when we know we got everything. A
+	// capped batch means there are still messages in (maxTS, now)
+	// the API didn't give us; advancing past oldest would skip them
+	// on the next reconnect.
+	if !res.Capped && maxTS != "" {
+		if _, err := b.db.AdvanceChannelLatestSyncedTS(row.ChannelID, maxTS); err != nil {
+			debuglog.Backfill("team=%s channel=%s advance watermark err=%v", b.workspaceID, row.ChannelID, err)
+		}
 	}
-	debuglog.Backfill("team=%s channel=%s oldest=%s count=%d dur_ms=%d%s",
-		b.workspaceID, row.ChannelID, oldest, len(msgs), time.Since(start).Milliseconds(), capped)
-	return len(msgs), nil
+
+	capStr := ""
+	if res.Capped {
+		capStr = " capped=true"
+	}
+	debuglog.Backfill("team=%s channel=%s oldest=%s count=%d max_ts=%s dur_ms=%d%s",
+		b.workspaceID, row.ChannelID, oldest, len(res.Messages), maxTS, time.Since(start).Milliseconds(), capStr)
+	return len(res.Messages), nil
 }
 
 // runThreadPhase iterates b.discoveredThreads, filters to threads
