@@ -522,7 +522,7 @@ type MessageMarkedUnreadMsg struct {
 // Slack pushes a channel_marked / im_marked / group_marked / mpim_marked
 // event (read state changed in another client, or via this client's own
 // mark echoing back). The handler has already persisted the new
-// last_read_ts to SQLite + the in-memory LastReadMap; the App's
+// last_read_ts to SQLite via cache.UpdateChannelReadState; the App's
 // Update arm only updates the UI. No toast.
 type ChannelMarkedRemoteMsg struct {
 	ChannelID   string
@@ -4214,9 +4214,9 @@ func (a *App) SetMessageDeleter(fn MessageDeleteFunc) {
 
 // SetMessageMarkUnreader wires the conversations.mark / subscriptions.thread.mark
 // callback used by the U key. Implementations should perform the HTTP call
-// best-effort, persist the new last_read_ts to SQLite for channel-level
-// marks (no-op for thread-level until per-thread state lands), update the
-// in-memory LastReadMap, and return MessageMarkedUnreadMsg.
+// best-effort, persist the new last_read_ts to SQLite via
+// cache.UpdateChannelReadState for channel-level marks (no-op for
+// thread-level until per-thread state lands), and return MessageMarkedUnreadMsg.
 func (a *App) SetMessageMarkUnreader(fn MarkUnreadFunc) {
 	a.messageMarkUnreader = fn
 }

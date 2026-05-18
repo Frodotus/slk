@@ -147,7 +147,6 @@ type WorkspaceContext struct {
 	// after a failed one. The UI uses it to decide whether to draw
 	// the "Threads list unavailable" banner.
 	SubscriptionsAvailable bool
-	LastReadMap       map[string]string
 	Channels    []sidebar.ChannelItem
 	// FinderItems is the merged list shown in the Ctrl+T finder. Initially
 	// contains only joined channels; the BrowseableChannelsLoadedMsg pipeline
@@ -805,7 +804,7 @@ func run() error {
 	// without any per-switch closure rebinding.
 	//
 	// Goroutines launched from inside a callback must capture
-	// workspace-scoped values (Client, LastReadMap, ...) into local
+	// workspace-scoped values (Client, UserNames, ...) into local
 	// vars BEFORE the `go func()` so they are not affected by a
 	// concurrent router.Set during the goroutine's lifetime.
 	wireCallbacks := func(router *workspaceRouter) {
@@ -814,7 +813,12 @@ func run() error {
 			if wctx == nil {
 				return ""
 			}
-			return wctx.LastReadMap[channelID]
+			state, err := db.GetChannelReadState(channelID)
+			if err != nil {
+				log.Printf("Warning: GetChannelReadState for %s: %v", channelID, err)
+				return ""
+			}
+			return state.LastReadTS
 		})
 
 		app.SetReadStateReader(func() map[string]cache.ReadState {
@@ -894,7 +898,8 @@ func run() error {
 			}
 			msgItems := fetchChannelMessages(wctx.Client, channelID, db, wctx.UserNames, tsFormat, avatarCache, router)
 
-			lastReadTS := wctx.LastReadMap[channelID]
+			state, _ := db.GetChannelReadState(channelID)
+			lastReadTS := state.LastReadTS
 
 			// Mark channel as read up to the latest message
 			if len(msgItems) > 0 {
@@ -1433,7 +1438,6 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 		AvatarURLs:           &sync.Map{},
 		UserNamesByHandle:    make(map[string]string),
 		BotUserIDs:           make(map[string]bool),
-		LastReadMap:          make(map[string]string),
 		CustomEmoji:          make(map[string]string),
 		LastVisitedByChannel: make(map[string]int64),
 	}
