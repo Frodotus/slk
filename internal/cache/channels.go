@@ -28,8 +28,6 @@ func (db *DB) UpsertChannel(ch Channel) error {
 			topic=excluded.topic,
 			is_member=excluded.is_member,
 			is_starred=excluded.is_starred,
-			last_read_ts=excluded.last_read_ts,
-			unread_count=excluded.unread_count,
 			updated_at=excluded.updated_at
 	`, ch.ID, ch.WorkspaceID, ch.Name, ch.Type, ch.Topic,
 		boolToInt(ch.IsMember), boolToInt(ch.IsStarred),

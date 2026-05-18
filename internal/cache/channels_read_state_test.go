@@ -205,3 +205,39 @@ func TestWorkspacesWithUnreads(t *testing.T) {
 		}
 	}
 }
+
+func TestUpsertChannel_DoesNotClobberReadState(t *testing.T) {
+	db, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+	newRSChannel(t, db, "C1", "T1")
+
+	// Set read state.
+	if err := db.UpdateChannelReadState("C1", "1700000000.000001", true); err != nil {
+		t.Fatalf("UpdateChannelReadState: %v", err)
+	}
+
+	// Re-upsert the channel with zero-value LastReadTS/UnreadCount.
+	// This mirrors what bootstrap (upsertChannelInDB) does today.
+	if err := db.UpsertChannel(Channel{
+		ID:          "C1",
+		WorkspaceID: "T1",
+		Name:        "renamed",
+		Type:        "channel",
+	}); err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+
+	state, err := db.GetChannelReadState("C1")
+	if err != nil {
+		t.Fatalf("GetChannelReadState: %v", err)
+	}
+	if state.LastReadTS != "1700000000.000001" {
+		t.Errorf("LastReadTS = %q, want preserved %q (clobber regression!)", state.LastReadTS, "1700000000.000001")
+	}
+	if !state.HasUnread {
+		t.Errorf("HasUnread = false after upsert (clobber regression!)")
+	}
+}
