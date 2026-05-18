@@ -26,7 +26,19 @@ type ChannelReadStateUpdate struct {
 // If lastReadTS == "", the existing last_read_ts is preserved. This is
 // the ONLY function permitted to modify read state after bootstrap.
 func (db *DB) UpdateChannelReadState(channelID, lastReadTS string, hasUnread bool) error {
-	return fmt.Errorf("not implemented")
+	var q string
+	var args []any
+	if lastReadTS == "" {
+		q = `UPDATE channels SET has_unread = ? WHERE id = ?`
+		args = []any{boolToInt(hasUnread), channelID}
+	} else {
+		q = `UPDATE channels SET last_read_ts = ?, has_unread = ? WHERE id = ?`
+		args = []any{lastReadTS, boolToInt(hasUnread), channelID}
+	}
+	if _, err := db.conn.Exec(q, args...); err != nil {
+		return fmt.Errorf("updating channel read state: %w", err)
+	}
+	return nil
 }
 
 // BatchUpdateChannelReadState writes multiple updates in a single
@@ -38,7 +50,19 @@ func (db *DB) BatchUpdateChannelReadState(updates []ChannelReadStateUpdate) erro
 // GetChannelReadState returns the read state for a single channel.
 // A missing row yields a zero-valued ReadState and a nil error.
 func (db *DB) GetChannelReadState(channelID string) (ReadState, error) {
-	return ReadState{}, fmt.Errorf("not implemented")
+	var lastReadTS string
+	var hasUnread int
+	err := db.conn.QueryRow(
+		`SELECT last_read_ts, has_unread FROM channels WHERE id = ?`,
+		channelID,
+	).Scan(&lastReadTS, &hasUnread)
+	if err == sql.ErrNoRows {
+		return ReadState{}, nil
+	}
+	if err != nil {
+		return ReadState{}, fmt.Errorf("getting channel read state: %w", err)
+	}
+	return ReadState{LastReadTS: lastReadTS, HasUnread: hasUnread == 1}, nil
 }
 
 // GetWorkspaceReadState returns channelID -> ReadState for every
@@ -53,5 +77,3 @@ func (db *DB) GetWorkspaceReadState(workspaceID string) (map[string]ReadState, e
 func (db *DB) WorkspacesWithUnreads() ([]string, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-
-var _ = sql.ErrNoRows // keep sql import for later use
