@@ -44,7 +44,43 @@ func (db *DB) UpdateChannelReadState(channelID, lastReadTS string, hasUnread boo
 // BatchUpdateChannelReadState writes multiple updates in a single
 // transaction. Used by bootstrap and reconnect catch-up paths.
 func (db *DB) BatchUpdateChannelReadState(updates []ChannelReadStateUpdate) error {
-	return fmt.Errorf("not implemented")
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin batch read-state tx: %w", err)
+	}
+	stmtBoth, err := tx.Prepare(`UPDATE channels SET last_read_ts = ?, has_unread = ? WHERE id = ?`)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("prepare both: %w", err)
+	}
+	defer stmtBoth.Close()
+	stmtFlag, err := tx.Prepare(`UPDATE channels SET has_unread = ? WHERE id = ?`)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("prepare flag: %w", err)
+	}
+	defer stmtFlag.Close()
+
+	for _, u := range updates {
+		if u.LastReadTS == "" {
+			if _, err := stmtFlag.Exec(boolToInt(u.HasUnread), u.ChannelID); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("batch flag for %s: %w", u.ChannelID, err)
+			}
+		} else {
+			if _, err := stmtBoth.Exec(u.LastReadTS, boolToInt(u.HasUnread), u.ChannelID); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("batch both for %s: %w", u.ChannelID, err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit batch read-state: %w", err)
+	}
+	return nil
 }
 
 // GetChannelReadState returns the read state for a single channel.

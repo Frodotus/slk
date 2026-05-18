@@ -81,3 +81,62 @@ func TestUpdateChannelReadState_Idempotent(t *testing.T) {
 		t.Errorf("state = %+v after 3 writes", state)
 	}
 }
+
+func TestBatchUpdateChannelReadState_WritesAll(t *testing.T) {
+	db, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+	newRSChannel(t, db, "C1", "T1")
+	newRSChannel(t, db, "C2", "T1")
+	newRSChannel(t, db, "C3", "T1")
+
+	updates := []ChannelReadStateUpdate{
+		{ChannelID: "C1", LastReadTS: "1.0001", HasUnread: true},
+		{ChannelID: "C2", LastReadTS: "1.0002", HasUnread: false},
+		{ChannelID: "C3", LastReadTS: "", HasUnread: true},
+	}
+	if err := db.BatchUpdateChannelReadState(updates); err != nil {
+		t.Fatalf("BatchUpdateChannelReadState: %v", err)
+	}
+	s1, _ := db.GetChannelReadState("C1")
+	if s1.LastReadTS != "1.0001" || !s1.HasUnread {
+		t.Errorf("C1 = %+v", s1)
+	}
+	s2, _ := db.GetChannelReadState("C2")
+	if s2.LastReadTS != "1.0002" || s2.HasUnread {
+		t.Errorf("C2 = %+v", s2)
+	}
+	s3, _ := db.GetChannelReadState("C3")
+	if s3.LastReadTS != "" || !s3.HasUnread {
+		t.Errorf("C3 = %+v (LastReadTS should be preserved empty)", s3)
+	}
+}
+
+func TestBatchUpdateChannelReadState_Transactional(t *testing.T) {
+	db, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+	newRSChannel(t, db, "C1", "T1")
+
+	// Seed C1
+	if err := db.UpdateChannelReadState("C1", "1.0", false); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Empty batch is a no-op and returns nil.
+	if err := db.BatchUpdateChannelReadState(nil); err != nil {
+		t.Errorf("nil batch: %v", err)
+	}
+	if err := db.BatchUpdateChannelReadState([]ChannelReadStateUpdate{}); err != nil {
+		t.Errorf("empty batch: %v", err)
+	}
+	// Original state untouched
+	s, _ := db.GetChannelReadState("C1")
+	if s.LastReadTS != "1.0" || s.HasUnread {
+		t.Errorf("after empty batch C1 = %+v", s)
+	}
+}
