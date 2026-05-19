@@ -27,10 +27,3 @@ func TestBackoffSequence(t *testing.T) {
 	}
 }
 
-func TestBackoffReset(t *testing.T) {
-	backoff := 16 * time.Second
-	backoff = 1 * time.Second
-	if backoff != 1*time.Second {
-		t.Errorf("expected 1s after reset, got %v", backoff)
-	}
-}

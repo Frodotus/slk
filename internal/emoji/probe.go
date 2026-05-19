@@ -121,9 +121,9 @@ func (b *bufferedTermReader) Drain() {
 	}
 }
 
-// ReadByte returns the next byte from the buffer or errProbeTimeout if
-// none arrives before the deadline.
-func (b *bufferedTermReader) ReadByte(deadline time.Time) (byte, error) {
+// ReadByteUntil returns the next byte from the buffer or errProbeTimeout
+// if none arrives before the deadline.
+func (b *bufferedTermReader) ReadByteUntil(deadline time.Time) (byte, error) {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		return 0, errProbeTimeout
@@ -163,7 +163,7 @@ func probeOne(out io.Writer, in *bufferedTermReader, emoji string, timeout time.
 	deadline := time.Now().Add(timeout)
 	var buf []byte
 	for {
-		c, err := in.ReadByte(deadline)
+		c, err := in.ReadByteUntil(deadline)
 		if err != nil {
 			fmt.Fprint(out, "\r\x1b[K")
 			return 0, err

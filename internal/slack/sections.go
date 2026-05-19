@@ -92,15 +92,7 @@ type wsChannelSectionUpserted struct {
 }
 
 func (e wsChannelSectionUpserted) toUpserted() ChannelSectionUpserted {
-	return ChannelSectionUpserted{
-		ID:         e.ID,
-		Name:       e.Name,
-		Type:       e.Type,
-		Emoji:      e.Emoji,
-		Next:       e.Next,
-		LastUpdate: e.LastUpdate,
-		IsRedacted: e.IsRedacted,
-	}
+	return ChannelSectionUpserted(e)
 }
 
 // ChannelSectionUpserted carries the data from a channel_section_upserted

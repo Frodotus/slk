@@ -95,13 +95,6 @@ const (
 	// syncing indicator. Channel was visited or WS-updated within this
 	// window so the SQLite snapshot is provably recent.
 	cacheFreshThreshold = 30 * time.Second
-
-	// cacheStaleThreshold: above this age, cache-first render is
-	// suppressed entirely and a spinner is shown until the network
-	// fetch returns. The 30-second...5-minute middle band gets the
-	// cache-first + verify-in-background treatment with the syncing
-	// indicator.
-	cacheStaleThreshold = 5 * time.Minute
 )
 
 // Messages sent between components
@@ -425,15 +418,6 @@ func boolToInt(b bool) int64 {
 		return 1
 	}
 	return 0
-}
-
-// mixVersions combines two monotonic int64 counters into one. Used when a
-// panel cache must invalidate on either of two underlying versions changing.
-// The mix isn't a hash -- it's just any function that yields a unique value
-// per (a, b) pair within practical ranges, which (a*small_prime ^ b) does for
-// counters that increment by 1 over a session.
-func mixVersions(a, b int64) int64 {
-	return a*1_000_003 ^ b
 }
 
 // SwitchWorkspaceFunc is called to switch the active workspace.
@@ -1677,6 +1661,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			SiblingCount: msg.SiblingCount,
 			SiblingIndex: msg.SiblingIndex,
 		}
+		// If the overlay is nil or already closed, the user dismissed
+		// it before the bytes arrived; drop the image on the floor.
 		if a.previewOverlay != nil && !a.previewOverlay.IsClosed() {
 			// Swap bytes into the existing overlay (whether it's the
 			// initial loading shell or an already-displayed image
@@ -1695,9 +1681,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		} else {
-			// User dismissed the overlay before bytes arrived; drop on
-			// the floor.
 		}
 
 	case previewErrorMsg:
@@ -4503,7 +4486,6 @@ func (a *App) previewFetchCmd(channel, ts string, attIdx int, cycle bool) tea.Cm
 // loading overlay in that case anyway because openImagePreviewCmd
 // returns nil.
 func (a *App) previewMetaForOpen(channel, ts string, attIdx int) (name string, sibCount, sibIndex int) {
-	sibCount = 1
 	msgItem, ok := a.findMessageInActiveChannel(channel, ts)
 	if !ok {
 		return "", 1, 0
