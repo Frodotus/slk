@@ -51,7 +51,7 @@ func (m *Model) SetEntries(entries []Entry) {
 func FromKeyMap(km any) []Entry {
 	var entries []Entry
 	v := reflect.ValueOf(km)
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 	if v.Kind() != reflect.Struct {
