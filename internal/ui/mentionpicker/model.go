@@ -59,6 +59,12 @@ func (m *Model) SetUsers(users []User) {
 	m.users = users
 }
 
+// Users returns the user list most recently set via SetUsers.
+// Used by tests; not part of the picker's input API.
+func (m *Model) Users() []User {
+	return m.users
+}
+
 func (m *Model) Open() {
 	m.visible = true
 	m.query = ""
