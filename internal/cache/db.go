@@ -165,6 +165,24 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_channel_visits_recent ON channel_visits(workspace_id, last_visited DESC);
 	CREATE INDEX IF NOT EXISTS idx_thread_subs_workspace
 		ON thread_subscriptions(workspace_id, active);
+
+	CREATE TABLE IF NOT EXISTS channel_members (
+		workspace_id TEXT NOT NULL,
+		channel_id   TEXT NOT NULL,
+		user_id      TEXT NOT NULL,
+		updated_at   INTEGER NOT NULL,
+		PRIMARY KEY (workspace_id, channel_id, user_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS channel_membership_meta (
+		workspace_id        TEXT NOT NULL,
+		channel_id          TEXT NOT NULL,
+		last_full_fetch_at  INTEGER NOT NULL,
+		PRIMARY KEY (workspace_id, channel_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_channel_members_channel
+		ON channel_members(workspace_id, channel_id);
 	`
 
 	if _, err := db.conn.Exec(schema); err != nil {
@@ -191,6 +209,10 @@ func (db *DB) migrate() error {
 	}
 	if err := db.addColumnIfMissing("channels", "has_unread",
 		"ALTER TABLE channels ADD COLUMN has_unread INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := db.addColumnIfMissing("users", "is_external",
+		"ALTER TABLE users ADD COLUMN is_external INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 
