@@ -120,6 +120,36 @@ func TestGetChannelMembershipMetaMissing(t *testing.T) {
 	}
 }
 
+func TestZeroChannelMembershipMetaPreservesMembers(t *testing.T) {
+	db := setupDBWithWorkspace(t)
+	defer db.Close()
+
+	_ = db.ReplaceChannelMembers("T1", "C1", []string{"U1", "U2"}, 12345)
+	if err := db.ZeroChannelMembershipMeta("T1", "C1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Members preserved.
+	got, _ := db.ListChannelMembers("T1", "C1")
+	if len(got) != 2 {
+		t.Errorf("members lost: %v", got)
+	}
+	// Meta zeroed.
+	ts, ok, _ := db.GetChannelMembershipMeta("T1", "C1")
+	if !ok || ts != 0 {
+		t.Errorf("meta = (%d, %v), want (0, true)", ts, ok)
+	}
+}
+
+func TestZeroChannelMembershipMetaMissingIsNoop(t *testing.T) {
+	db := setupDBWithWorkspace(t)
+	defer db.Close()
+
+	if err := db.ZeroChannelMembershipMeta("T1", "C_NEVER_FETCHED"); err != nil {
+		t.Errorf("zeroing nonexistent meta should be noop; got %v", err)
+	}
+}
+
 func TestChannelMembersScopedByWorkspace(t *testing.T) {
 	db := setupDBWithWorkspace(t)
 	defer db.Close()

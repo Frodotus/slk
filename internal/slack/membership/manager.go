@@ -41,9 +41,10 @@ type Manager struct {
 	push        PushFunc
 	resolver    UserResolver
 
-	mu       sync.Mutex
-	members  map[string]map[string]struct{} // channelID -> member set
-	fetching map[string]struct{}            // in-flight sentinel by channelID
+	mu          sync.Mutex
+	members     map[string]map[string]struct{} // channelID -> member set
+	fetching    map[string]struct{}            // in-flight sentinel by channelID
+	lastFetched map[string]time.Time           // last successful full-fetch (in-memory, for dedup)
 }
 
 // New constructs a Manager bound to one workspace.
@@ -56,6 +57,7 @@ func New(workspaceID string, api ConversationMemberAPI, db *cache.DB, push PushF
 		resolver:    resolver,
 		members:     map[string]map[string]struct{}{},
 		fetching:    map[string]struct{}{},
+		lastFetched: map[string]time.Time{},
 	}
 }
 
@@ -128,6 +130,15 @@ func (m *Manager) backgroundFetch(ctx context.Context, channelID string) {
 		m.mu.Unlock()
 		return
 	}
+	// Also dedup against an in-memory recent-fetch timestamp: a prior
+	// goroutine may have already completed and released the sentinel
+	// before this one arrived. The DB-backed TTL check in EnsureFresh
+	// can't catch this because a flurry of concurrent EnsureFresh calls
+	// all read the (empty) meta before any one of them persists.
+	if last, ok := m.lastFetched[channelID]; ok && time.Since(last) < TTL {
+		m.mu.Unlock()
+		return
+	}
 	m.fetching[channelID] = struct{}{}
 	m.mu.Unlock()
 	defer func() {
@@ -140,6 +151,11 @@ func (m *Manager) backgroundFetch(ctx context.Context, channelID string) {
 	if err != nil {
 		return
 	}
+	if m.resolver != nil {
+		for _, id := range ids {
+			m.resolver.Request(id)
+		}
+	}
 	now := time.Now().Unix()
 	if err := m.db.ReplaceChannelMembers(m.workspaceID, channelID, ids, now); err != nil {
 		return
@@ -150,6 +166,61 @@ func (m *Manager) backgroundFetch(ctx context.Context, channelID string) {
 	}
 	m.mu.Lock()
 	m.members[channelID] = set
+	m.lastFetched[channelID] = time.Now()
 	m.mu.Unlock()
 	m.pushSnapshot(channelID)
+}
+
+// ApplyJoin records a single membership addition (from a
+// member_joined_channel event). Single-row upsert; does NOT bump
+// last_full_fetch_at — that timestamp tracks full-fetch freshness only.
+// If a UserResolver is configured, ApplyJoin invokes it for the user
+// (resolver dedupes via its inflight map; redundant calls are cheap).
+func (m *Manager) ApplyJoin(channelID, userID string) {
+	now := time.Now().Unix()
+	if err := m.db.UpsertChannelMember(m.workspaceID, channelID, userID, now); err != nil {
+		return
+	}
+	m.mu.Lock()
+	set := m.members[channelID]
+	if set == nil {
+		set = map[string]struct{}{}
+		m.members[channelID] = set
+	}
+	set[userID] = struct{}{}
+	m.mu.Unlock()
+
+	if m.resolver != nil {
+		m.resolver.Request(userID)
+	}
+	m.pushSnapshot(channelID)
+}
+
+// ApplyLeave records a single membership removal.
+func (m *Manager) ApplyLeave(channelID, userID string) {
+	if err := m.db.DeleteChannelMember(m.workspaceID, channelID, userID); err != nil {
+		return
+	}
+	m.mu.Lock()
+	if set := m.members[channelID]; set != nil {
+		delete(set, userID)
+	}
+	m.mu.Unlock()
+	m.pushSnapshot(channelID)
+}
+
+// ForceStale invalidates the freshness timestamp for a channel so the
+// next EnsureFresh will trigger a re-fetch. Called from the websocket
+// reconnect hook for the currently active channel. Preserves both the
+// in-memory and persisted member list — only the meta timestamp is
+// zeroed.
+func (m *Manager) ForceStale(channelID string) {
+	if err := m.db.ZeroChannelMembershipMeta(m.workspaceID, channelID); err != nil {
+		return
+	}
+	// Also clear the in-memory dedup window so EnsureFresh actually
+	// re-fetches even within a recent successful-fetch interval.
+	m.mu.Lock()
+	delete(m.lastFetched, channelID)
+	m.mu.Unlock()
 }

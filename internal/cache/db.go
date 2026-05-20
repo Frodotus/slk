@@ -48,6 +48,14 @@ func New(dsn string) (*DB, error) {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
+	// SQLite ":memory:" databases are per-connection: each new
+	// connection in the pool gets its own empty database. Pin the
+	// pool to a single connection so concurrent writers all see the
+	// same in-memory schema. Disk-backed DSNs are unaffected.
+	if strings.HasPrefix(dsn, ":memory:") {
+		conn.SetMaxOpenConns(1)
+	}
+
 	db := &DB{conn: conn}
 	if err := db.migrate(); err != nil {
 		conn.Close()

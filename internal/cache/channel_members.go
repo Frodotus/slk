@@ -103,6 +103,25 @@ func (db *DB) ReplaceChannelMembers(workspaceID, channelID string, userIDs []str
 	return nil
 }
 
+// ZeroChannelMembershipMeta sets last_full_fetch_at to 0 for a
+// channel without touching the channel_members table. Used by
+// membership.Manager.ForceStale on websocket reconnect to invalidate
+// freshness without wiping the persisted member list.
+//
+// No-op (no error) if the meta row doesn't exist — there's nothing
+// to invalidate, and the next full fetch will create the row.
+func (db *DB) ZeroChannelMembershipMeta(workspaceID, channelID string) error {
+	_, err := db.conn.Exec(`
+		UPDATE channel_membership_meta
+		SET last_full_fetch_at = 0
+		WHERE workspace_id = ? AND channel_id = ?
+	`, workspaceID, channelID)
+	if err != nil {
+		return fmt.Errorf("zeroing channel membership meta: %w", err)
+	}
+	return nil
+}
+
 // GetChannelMembershipMeta returns last_full_fetch_at for a channel.
 // ok=false if no row exists (channel never fetched).
 func (db *DB) GetChannelMembershipMeta(workspaceID, channelID string) (int64, bool, error) {
