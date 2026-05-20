@@ -1,6 +1,9 @@
 package mentionpicker
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestFilterByDisplayNamePrefix(t *testing.T) {
 	m := New()
@@ -59,9 +62,9 @@ func TestFilterEmptyQueryShowsAll(t *testing.T) {
 	})
 	m.Open()
 	m.SetQuery("")
-	// Empty query shows specials (3) + first users up to MaxVisible=5 total
-	if len(m.Filtered()) != 5 {
-		t.Fatalf("expected 5 filtered users (max), got %d", len(m.Filtered()))
+	// Empty query shows specials (3) + first users up to MaxVisible=7 total
+	if len(m.Filtered()) != 7 {
+		t.Fatalf("expected 7 filtered users (max), got %d", len(m.Filtered()))
 	}
 }
 
@@ -151,6 +154,66 @@ func TestSelectEmptyReturnsNil(t *testing.T) {
 	result := m.Select()
 	if result != nil {
 		t.Error("expected nil result for empty filtered list")
+	}
+}
+
+func TestFilterSortsInChannelBeforeNotInChannel(t *testing.T) {
+	m := New()
+	m.SetUsers([]User{
+		{ID: "U1", DisplayName: "alice", InChannel: false},
+		{ID: "U2", DisplayName: "bob", InChannel: true},
+		{ID: "U3", DisplayName: "charlie", InChannel: false},
+		{ID: "U4", DisplayName: "dan", InChannel: true},
+	})
+	m.Open()
+	got := m.Filtered()
+	// Special mentions match empty query too. Strip them to assert user order.
+	var names []string
+	for _, u := range got {
+		if u.ID == "U1" || u.ID == "U2" || u.ID == "U3" || u.ID == "U4" {
+			names = append(names, u.DisplayName)
+		}
+	}
+	want := []string{"bob", "dan", "alice", "charlie"}
+	if !reflect.DeepEqual(names, want) {
+		t.Errorf("user order = %v, want %v", names, want)
+	}
+}
+
+func TestFilterAlphabeticalWithinTier(t *testing.T) {
+	m := New()
+	m.SetUsers([]User{
+		{ID: "U1", DisplayName: "zoe", InChannel: true},
+		{ID: "U2", DisplayName: "alex", InChannel: true},
+		{ID: "U3", DisplayName: "mia", InChannel: true},
+	})
+	m.Open()
+	var names []string
+	for _, u := range m.Filtered() {
+		if u.ID != "" && u.ID[:1] == "U" {
+			names = append(names, u.DisplayName)
+		}
+	}
+	want := []string{"alex", "mia", "zoe"}
+	if !reflect.DeepEqual(names, want) {
+		t.Errorf("alpha order = %v, want %v", names, want)
+	}
+}
+
+func TestSpecialMentionsAlwaysInChannel(t *testing.T) {
+	m := New()
+	m.SetUsers(nil)
+	m.Open()
+	for _, u := range m.Filtered() {
+		if !u.InChannel {
+			t.Errorf("special mention %s should have InChannel=true", u.DisplayName)
+		}
+	}
+}
+
+func TestMaxVisibleSeven(t *testing.T) {
+	if MaxVisible != 7 {
+		t.Errorf("MaxVisible = %d, want 7", MaxVisible)
 	}
 }
 

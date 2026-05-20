@@ -2,6 +2,7 @@ package mentionpicker
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -9,12 +10,26 @@ import (
 	"github.com/gammons/slk/internal/ui/styles"
 )
 
-const MaxVisible = 5
+const MaxVisible = 7
 
 type User struct {
 	ID          string
 	DisplayName string
 	Username    string
+	// InChannel indicates whether the user is a member of the active
+	// channel. False sorts the user into the not-in-channel tier (below
+	// in-channel users in the picker). The caller is responsible for
+	// populating this field. Special mentions (@here / @channel /
+	// @everyone) always have InChannel=true. For workspace users, the
+	// compose layer computes the value from the active channel's member
+	// set (see compose.rebuildMentionUsers); when no membership data
+	// has been loaded yet, compose defaults it to true to preserve the
+	// pre-channel-aware behavior.
+	InChannel bool
+	// IsExternal indicates a Slack Connect / shared-channel guest
+	// whose home team_id differs from the workspace TeamID. Drives
+	// the "(ext)" suffix in the picker.
+	IsExternal bool
 }
 
 type MentionResult struct {
@@ -23,9 +38,9 @@ type MentionResult struct {
 }
 
 var specialMentions = []User{
-	{ID: "special:here", DisplayName: "here", Username: "here"},
-	{ID: "special:channel", DisplayName: "channel", Username: "channel"},
-	{ID: "special:everyone", DisplayName: "everyone", Username: "everyone"},
+	{ID: "special:here", DisplayName: "here", Username: "here", InChannel: true},
+	{ID: "special:channel", DisplayName: "channel", Username: "channel", InChannel: true},
+	{ID: "special:everyone", DisplayName: "everyone", Username: "everyone", InChannel: true},
 }
 
 type Model struct {
@@ -108,26 +123,46 @@ func (m *Model) Select() *MentionResult {
 
 func (m *Model) filter() {
 	q := text.Fold(m.query)
-	var results []User
+	matches := func(u User) bool {
+		if q == "" {
+			return true
+		}
+		return strings.HasPrefix(text.Fold(u.DisplayName), q) ||
+			strings.HasPrefix(text.Fold(u.Username), q)
+	}
 
-	// Special mentions first
+	var specials, inCh, notInCh []User
 	for _, u := range specialMentions {
-		if q == "" || strings.HasPrefix(text.Fold(u.DisplayName), q) || strings.HasPrefix(text.Fold(u.Username), q) {
-			results = append(results, u)
+		if matches(u) {
+			specials = append(specials, u)
+		}
+	}
+	for _, u := range m.users {
+		if !matches(u) {
+			continue
+		}
+		if u.InChannel {
+			inCh = append(inCh, u)
+		} else {
+			notInCh = append(notInCh, u)
 		}
 	}
 
-	// Then regular users
-	for _, u := range m.users {
-		if q == "" || strings.HasPrefix(text.Fold(u.DisplayName), q) || strings.HasPrefix(text.Fold(u.Username), q) {
-			results = append(results, u)
-		}
-	}
+	sort.Slice(inCh, func(i, j int) bool {
+		return inCh[i].DisplayName < inCh[j].DisplayName
+	})
+	sort.Slice(notInCh, func(i, j int) bool {
+		return notInCh[i].DisplayName < notInCh[j].DisplayName
+	})
+
+	results := make([]User, 0, len(specials)+len(inCh)+len(notInCh))
+	results = append(results, specials...)
+	results = append(results, inCh...)
+	results = append(results, notInCh...)
 
 	if len(results) > MaxVisible {
 		results = results[:MaxVisible]
 	}
-
 	m.filtered = results
 }
 
