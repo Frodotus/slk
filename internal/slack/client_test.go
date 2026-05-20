@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gammons/slk/internal/slackhttp"
 	"github.com/slack-go/slack"
 )
 
@@ -1790,5 +1791,42 @@ func TestListThreadSubscriptions_ReturnsErrorOnNotOK(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid_auth") {
 		t.Errorf("error = %q, want contains \"invalid_auth\"", err.Error())
+	}
+}
+
+func TestNewClient_UsesBrowserTransport(t *testing.T) {
+	var gotHeaders http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true,"team_id":"T1","user_id":"U1","url":"https://example.slack.com/"}`)
+	}))
+	defer srv.Close()
+
+	// Build a Client via NewClient, then point its slack-go api at our
+	// httptest server. Use slack.OptionAPIURL on a fresh slack-go client
+	// that shares the SAME http.Client we built — so the BrowserTransport
+	// is exercised.
+	c := NewClient("xoxc-test", "test-cookie")
+	c.api = slack.New(
+		c.token,
+		slack.OptionHTTPClient(c.httpClient),
+		slack.OptionAPIURL(srv.URL+"/"),
+	)
+
+	// BrowserTransport only injects headers on *.slack.com hosts. httptest
+	// binds to 127.0.0.1 so the headers won't appear on the wire here —
+	// header-injection coverage lives in internal/slackhttp/transport_test.go.
+	// This test only verifies the wiring contract.
+	if _, ok := c.httpClient.Transport.(*slackhttp.BrowserTransport); !ok {
+		t.Fatalf("c.httpClient.Transport = %T; want *slackhttp.BrowserTransport", c.httpClient.Transport)
+	}
+
+	// Sanity check: a real call goes through and reaches the server.
+	if _, err := c.api.AuthTest(); err != nil {
+		t.Fatalf("AuthTest: %v", err)
+	}
+	if gotHeaders == nil {
+		t.Fatal("server never received a request")
 	}
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/slack/mrkdwn"
+	"github.com/gammons/slk/internal/slackhttp"
 	"github.com/gorilla/websocket"
 	"github.com/slack-go/slack"
 )
@@ -119,9 +120,12 @@ func newCookieJar(dCookie string) http.CookieJar {
 	return jar
 }
 
-// newCookieHTTPClient creates an http.Client with the Slack 'd' cookie set.
+// newCookieHTTPClient creates an http.Client with the Slack 'd' cookie set
+// and a BrowserTransport that injects Chrome-like headers on every request
+// to *.slack.com hosts. This keeps Enterprise Grid anomaly detectors from
+// flagging slk's traffic as non-browser. See internal/slackhttp.
 func newCookieHTTPClient(dCookie string) *http.Client {
-	return &http.Client{Jar: newCookieJar(dCookie)}
+	return slackhttp.NewBrowserHTTPClient(newCookieJar(dCookie))
 }
 
 // TeamID returns the authenticated workspace's team ID.
