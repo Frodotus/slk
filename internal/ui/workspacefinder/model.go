@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/gammons/slk/internal/text"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/overlay"
 	"github.com/gammons/slk/internal/ui/styles"
@@ -112,7 +113,7 @@ func (m *Model) HandleKey(keyStr string) *WorkspaceResult {
 // filter rebuilds the filtered list based on the current query.
 func (m *Model) filter() {
 	m.filtered = nil
-	q := strings.ToLower(m.query)
+	q := text.Fold(m.query)
 
 	if q == "" {
 		for i := range m.items {
@@ -124,7 +125,7 @@ func (m *Model) filter() {
 	// Prefix matches first, then substring matches
 	var prefixMatches, substringMatches []int
 	for i, item := range m.items {
-		name := strings.ToLower(item.Name)
+		name := text.Fold(item.Name)
 		if strings.HasPrefix(name, q) {
 			prefixMatches = append(prefixMatches, i)
 		} else if strings.Contains(name, q) {
