@@ -961,45 +961,7 @@ func (a *App) handleChannelFinderMode(msg tea.KeyMsg) tea.Cmd {
 
 // handleWorkspaceFinderMode moved to mode_workspace_finder.go (Phase 5e).
 
-func (a *App) handleThemeSwitcherMode(msg tea.KeyMsg) tea.Cmd {
-	keyStr := msg.String()
-	switch msg.Key().Code {
-	case tea.KeyEnter:
-		keyStr = "enter"
-	case tea.KeyEscape:
-		keyStr = "esc"
-	case tea.KeyUp:
-		keyStr = "up"
-	case tea.KeyDown:
-		keyStr = "down"
-	case tea.KeyBackspace:
-		keyStr = "backspace"
-	}
-
-	result := a.themeSwitcher.HandleKey(keyStr)
-	if result != nil {
-		a.themeSwitcher.Close()
-		a.SetMode(ModeNormal)
-		// Apply theme immediately
-		styles.Apply(result.Name, a.themeOverrides)
-		// Invalidate render caches so they rebuild with new theme colors
-		a.messagepane.InvalidateCache()
-		a.threadPanel.InvalidateCache()
-		a.sidebar.InvalidateCache()
-		// Refresh compose textarea styles for new theme
-		a.compose.RefreshStyles()
-		a.threadCompose.RefreshStyles()
-		// Save selection
-		if a.themeSaveFn != nil {
-			a.themeSaveFn(result.Name, result.Scope)
-		}
-		return nil
-	}
-	if !a.themeSwitcher.IsVisible() {
-		a.SetMode(ModeNormal)
-	}
-	return nil
-}
+// handleThemeSwitcherMode moved to mode_theme_switcher.go (Phase 5g).
 
 // handleHelpMode moved to mode_help.go (Phase 5c).
 
