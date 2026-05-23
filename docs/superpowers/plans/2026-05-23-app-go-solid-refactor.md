@@ -1,7 +1,7 @@
 # internal/ui/app.go SOLID Refactor — Implementation Plan
 
-> **Status:** Phases 0–6 complete (10 state extractions + 4 service interfaces + 12 reducer migrations + 11 mode-handler extractions + 8 View region extractions). Phase 7 remains (deferred; lowest priority).
-> **Branch:** `refactor/app-phase-2-extract-state-objects` (tip carries Phases 2+3+4+5+6; earlier phases on their own branches off main).
+> **Status:** Phases 0–7 **COMPLETE**. The full SOLID refactor of internal/ui/app.go has shipped: 10 state extractions + 4 service interfaces + 12 reducer migrations + 11 mode-handler extractions + 8 View region extractions + 5 typed-ID seam migrations.
+> **Branch:** `refactor/app-phase-2-extract-state-objects` (tip carries Phases 2+3+4+5+6+7; earlier phases on their own branches off main).
 > **Working baseline:** `f2defed` (main as of the rebase, includes upstream wheel-scroll + click-to-thread changes).
 
 **Goal:** Apply SOLID principles to the 6,200-line God Object that is `internal/ui/app.go`. The `App` struct previously held ~95 fields and ~120 methods spanning at least a dozen unrelated concerns (mouse FSM, image preview overlay, navigation history, typing indicators, presence/DND, edit state, ...). Reduce App's surface area, separate concerns into self-contained collaborators, and prepare the file for further structural work (reducer split, mode-handler strategy, View region split).
@@ -23,17 +23,19 @@ Confirmed before Phase 0:
 
 ## Running tally vs original baseline
 
-| | Original | After Phase 2 | After Phase 3 | After Phase 4 | After Phase 5 | After Phase 6 | Δ from original |
-|---|---|---|---|---|---|---|---|
-| `app.go` lines | 6,216 | 5,099 | 4,920 | 3,434 | 2,733 | **2,349** | **−3,867 (−62.2%)** |
-| `Update` body lines | ~1,571 | ~1,571 | ~1,571 | ~85 | ~85 | ~85 | **−1,486 (−94.6%)** |
-| `View` body lines | ~432 | ~432 | ~432 | ~432 | ~432 | **~50** | **−382 (−88.4%)** |
-| `handleKey` mode switch | ~24 lines | ~24 | ~24 | ~24 | 1 | 1 | **−23 (−95.8%)** |
-| `handle*Mode` methods on App | 11 (~700 lines) | 11 | 11 | 11 | 0 | 0 | all moved to per-mode files |
-| `App` struct fields | ~95 | ~60 | ~40 | ~40 | ~40 | ~40 | ~−55, consolidated into 10 controllers + 4 service interfaces |
-| `App` callback `Set*` methods | ~28 | ~28 | 4 | 4 | 4 | 4 | **−24** (24 collapsed into 4 service setters) |
-| main.go wiring calls | ~40 | ~40 | ~20 | ~20 | ~20 | ~20 | **−20** |
-| Cohesive new files under `internal/ui/` | 0 | 12 | 14 | 22 | 34 | **43** | + view_helpers.go + 8 view_*.go (Phase 6) |
+| | Original | After Phase 2 | After Phase 3 | After Phase 4 | After Phase 5 | After Phase 6 | After Phase 7 | Δ from original |
+|---|---|---|---|---|---|---|---|---|
+| `app.go` lines | 6,216 | 5,099 | 4,920 | 3,434 | 2,733 | 2,349 | 2,357 | **−3,859 (−62.1%)** |
+| `Update` body lines | ~1,571 | ~1,571 | ~1,571 | ~85 | ~85 | ~85 | ~85 | **−1,486 (−94.6%)** |
+| `View` body lines | ~432 | ~432 | ~432 | ~432 | ~432 | ~50 | ~50 | **−382 (−88.4%)** |
+| `handleKey` mode switch | ~24 lines | ~24 | ~24 | ~24 | 1 | 1 | 1 | **−23 (−95.8%)** |
+| `handle*Mode` methods on App | 11 (~700 lines) | 11 | 11 | 11 | 0 | 0 | 0 | all moved to per-mode files |
+| Service interface methods using typed IDs | 0 | 0 | 0 | 0 | 0 | 0 | **27** | (all 27 across the 4 services) |
+| `App` struct fields | ~95 | ~60 | ~40 | ~40 | ~40 | ~40 | ~40 | ~−55, consolidated into 10 controllers + 4 service interfaces |
+| `App` callback `Set*` methods | ~28 | ~28 | 4 | 4 | 4 | 4 | 4 | **−24** (24 collapsed into 4 service setters) |
+| main.go wiring calls | ~40 | ~40 | ~20 | ~20 | ~20 | ~20 | ~20 | **−20** |
+| Cohesive new files under `internal/ui/` | 0 | 12 | 14 | 22 | 34 | 43 | 43 | + 9 view_*.go (Phase 6) |
+| Total new package files added | 0 | 12 | 14 | 22 | 34 | 43 | **44** | + internal/ids/ids.go (Phase 7) |
 
 ---
 
@@ -497,19 +499,79 @@ func (a *App) View() tea.View {
 
 ## Phase 7 — Tighten types (Primitive Obsession)
 
-**Goal:** Introduce ID types for the strings that are passed around everywhere.
+**Goal:** Introduce ID types for the strings that are passed around everywhere, scoped to the seams built in Phases 2-6.
 
-**Status:** **NOT STARTED — DEFERRED.** Lowest priority, largest blast radius.
+**Status:** **COMPLETE** — 5 sub-phases (7a–7e) over commits `9d3a48c..ca3eacd`.
 
-```go
-type ChannelID string
-type TeamID    string
-type ThreadTS  string
-type UserID    string
-type MessageTS string
-```
+### Phase 7 design choices (decided at start)
 
-**Why deferred:** This touches every package boundary (messages, sidebar, thread, channelfinder, cache, slack/...) and every call site of the new service interfaces from Phase 3. Worth doing eventually for the bug class it catches (channelID/teamID swap, threadTS in a channelID slot), but only after Phases 3-6 have settled the public surfaces.
+The original plan flagged this phase as "lowest priority, largest blast radius" with ~2,690 raw `channelID/teamID/threadTS/userID/messageTS` occurrences across ~96 files. Full conversion would have been a multi-week effort. Three scope-narrowing decisions made it tractable:
+
+1. **Smallest scope: types-at-boundaries only.** Define the named types in a new `internal/ids` package. Use them ONLY in the Phase 3 service interfaces and their backing `XxxFunc` callback types (the seams we just built). App fields, msg struct fields, and the `cache` / `slack` / `cmd/slk` packages stay as plain `string`. Conversions happen at the seam: App callsites pass `ids.ChannelID(a.activeChannelID)`; `cmd/slk` closures receive typed parameters and convert back to `string` for SQLite / HTTP serialization. This catches the highest-value bug class (cross-boundary ID swaps) without rewriting the world.
+
+2. **Named string types, not wrapper structs.** `type ChannelID string` is transparent to `encoding/json`, lipgloss, fmt verbs, and map keys — every operation that needs a plain string is reachable via `string(id)`. Wrapper structs would require Marshaler/Unmarshaler implementations everywhere data crosses the SQLite / HTTP boundary; named string types add zero serialization surface.
+
+3. **One service per sub-phase, smallest first.** Same cadence as Phases 4 and 5: 7a sets up the types, then 7b-7e migrate one Phase 3 service at a time. Each sub-phase is atomically green (interface + adapter + App callers + main.go closures + test fakes), bisect-friendly.
+
+### Phase 7 summary table
+
+| Sub | Service | Commit | New typed signatures |
+|---|---|---|---|
+| 7a | `internal/ids/ids.go` (setup) | `9d3a48c` | declarations only: ChannelID, TeamID, ThreadTS, MessageTS, UserID |
+| 7b | ReactionService | `3f61309` | Add/Remove take (ids.ChannelID, ids.MessageTS, string) |
+| 7c | MessageService | `208e56d` | Send/Edit/Delete/MarkUnread/Permalink; introduces threading of ChannelID + MessageTS + ThreadTS together (MarkUnread is the 4-ID arm) |
+| 7d | ThreadService | `e005a6f` | Fetch/CacheRead/Mark/SendReply/ListFetch/ChannelLastRead; first phase to introduce ids.TeamID (from ListFetch) |
+| 7e | ChannelService | `ca3eacd` | 9 methods + ChannelLookupFunc + ChannelVisitRecorder; largest sub-phase by call-site count |
+| — | **Totals** | — | 5 commits, all 39/39 packages green, vet clean, no bench regression |
+
+### Files added during Phase 7
+
+- `internal/ids/ids.go` (64 lines) — 5 named string types, doc-only otherwise
+
+### Patterns that emerged during Phase 7
+
+1. **Convert at the boundary, not at the point of use.** App callsites compute a typed wrapper at the closure-capture line, then reference it inside the returned `tea.Cmd`:
+   ```go
+   channelID := ids.ChannelID(a.activeChannelID)
+   ts := ids.MessageTS(msg.TS)
+   return func() tea.Msg {
+       err := a.reactions.Add(channelID, ts, emojiName)
+       return ReactionSentMsg{Err: err}
+   }
+   ```
+   Keeps the conversion visible at one site per call, not buried inside the closure body.
+
+2. **`cmd/slk` closures take typed in, convert to string at the first downstream call.** The pattern is `chIDStr := string(channelID)` as the closure's first line, then `chIDStr` flows into the SQLite / Slack-Client / log calls. The typed parameter survives only as long as it needs to (for cross-boundary safety); inside the closure it's already a plain string.
+
+3. **Msg struct fields stay as `string`.** `MessagesLoadedMsg.ChannelID`, `MessageSentMsg.ChannelID`, `ThreadRepliesLoadedMsg.ThreadTS`, etc. all keep their existing string types. Converting them would cascade into every reducer arm that consumes the messages (and every test that constructs them by literal). Out of scope per the boundary policy. The boundary catches the bug class on the way IN (caller → service); the way OUT (service → msg → reducer) re-flattens to string and is checked by the residual integration tests.
+
+4. **Test shims preserve the typed signature.** `services_helpers_test.go` setters that take a single closure (e.g. `setChannelMembershipFetcherForTest(fn func(channelID ids.ChannelID))`) propagate the typed signature so test fakes match the production type. The test bodies do `string(channelID)` when comparing or storing into existing string-typed slices — the conversion is visible at the test assertion site.
+
+5. **One-liner conversion inside navHistory.Walk.** When a controller (`navHistoryStore`) holds entries as plain strings but calls a now-typed `ChannelLookupFunc`, the conversion is a single inline `lookup(ids.ChannelID(entry))` at the call site. The controller stays string-only internally; the boundary conversion is invisible to its callers.
+
+### Why a local variable named `ids` shadowed the package import (note for future contributors)
+
+`cmd/slk/main.go:850` has a `SetWorkspaceUnreadReader` closure containing `ids, err := db.WorkspacesWithUnreads()` — a local `[]string` named `ids`. Inside that closure body, `ids` refers to the local; the package import is shadowed for those few lines. Phase 7e's ChannelService closures are in a different scope and were unaffected, but any future Phase 7 work that touches that closure should rename the local (e.g. to `unreadIDs`) before reaching for `ids.X(...)`.
+
+### Verification after Phase 7
+
+- `go vet ./...` clean · `go build ./...` clean
+- 39/39 packages green
+- View benchmarks (3-iteration steady-state):
+  - `BenchmarkAppViewCompose ~4.84ms` (Phase 5/6 baseline ~4.81ms; within noise)
+  - `BenchmarkAppViewIdle ~1.90ms` (unchanged)
+- Zero runtime cost expected and observed: named string types compile to plain strings; no allocations, no indirection.
+
+### Scope that was deliberately NOT migrated
+
+The "smallest scope" decision left these as plain string and they stay that way:
+
+- **App struct fields** (`a.activeChannelID`, `a.activeTeamID`, `a.currentUserID`, `a.lastOpenedChannelID`, `a.lastOpenedThreadTS`, the `map[string]string` lastChannelByTeam, etc.). These would cascade into every reducer / controller / mode-handler that reads them.
+- **`*Msg` struct fields** (`MessagesLoadedMsg.ChannelID`, `ThreadRepliesLoadedMsg.ThreadTS`, etc.). These would cascade into every consumer.
+- **Phase 2 controllers' internal state** (`presenceController.byTeam map[string]workspaceStatus`, `typingTracker.users map[string]map[string]time.Time`, `editController.channelID`, etc.). Out of scope.
+- **`internal/cache`, `internal/slack`, `internal/service`** — the data-layer packages. SQLite parameters and Slack HTTP requests/responses serialize as plain strings; typing them would add Marshaler/Unmarshaler surface for no safety gain (the boundary is already crossed at the service-closure level).
+
+A hypothetical "Phase 7+" could expand the typed zone outward, but the value-vs-cost ratio drops sharply past the service seam. The current scope catches the highest-value bug class with the smallest footprint.
 
 ---
 
@@ -587,10 +649,16 @@ main (f2defed = merged #26 scroll improvements)
         ├── 4fbb0e7  phase 6f — sidebar renderer
         ├── e6a7a54  phase 6g — messages region renderer (largest)
         ├── 7631cf0  phase 6h — thread region renderer
-        └── 8cd340e  phase 6i — preview overlay panel renderer (final)
+        ├── 8cd340e  phase 6i — preview overlay panel renderer (final)
+        ├── 902a088  docs — phase 6 complete
+        ├── 9d3a48c  phase 7a — declare named ID types (setup only)
+        ├── 3f61309  phase 7b — ReactionService typed IDs
+        ├── 208e56d  phase 7c — MessageService typed IDs
+        ├── e005a6f  phase 7d — ThreadService typed IDs
+        └── ca3eacd  phase 7e — ChannelService typed IDs (final)
 ```
 
-Phase 4f was deliberately skipped (see Phase 4 summary table for rationale). Phase 0/1 branches still point to their pre-rebase commits. If they need to be PR'd separately to main, re-rebase them onto current main first. The tip branch's name is now stale (it carries Phases 2+3+4+5+6, ~51 commits) but the contents are unambiguous.
+Phase 4f was deliberately skipped (see Phase 4 summary table for rationale). Phase 0/1 branches still point to their pre-rebase commits. If they need to be PR'd separately to main, re-rebase them onto current main first. The tip branch's name is now stale (it carries Phases 2+3+4+5+6+7, ~56 commits) but the contents are unambiguous.
 
 ---
 
@@ -602,4 +670,7 @@ If picking this up in a new session:
 2. `git fetch origin && git log --oneline HEAD..origin/main` — check for upstream drift.
 3. If there are new commits on main, rebase: `git rebase origin/main`. The conflict surface for any future drift is concentrated in `app.go`'s remaining handler bodies and the per-reducer files in `internal/ui/reducer_*.go`; an upstream change that added a new message arm would land in the `Update` switch where the matching reducer's `Handle` method now is.
 4. Read this doc + skim the most recent phase's commit message for context.
-5. Pick the next phase from the "NOT STARTED" set above. **Phase 7 (Primitive Obsession / ID types)** is the only remaining phase. It's deferred for the reasons listed in the Phase 7 section (touches every package boundary; the safety win is real but small for TUI-internal ID strings). Whether to pursue it is a separate decision; the structural refactor goals (Phases 0–6) are achieved.
+5. All 7 phases have shipped. The refactor is COMPLETE. The branch is in a natural stopping state. Options for next steps:
+   - **Merge to main** as one or more PRs. The branch carries ~56 commits across Phases 2-7; could PR as one large branch, or split per-phase (Phase 2, Phase 3, ..., Phase 7) for staged review.
+   - **Pursue follow-up work** flagged by individual phases (e.g. consolidating the 4 remaining inline `tea.Tick(100ms, SpinnerTickMsg{})` literals into `spinnerTickCmd()` calls; expanding the typed-ID zone past the service seam into App fields if the team wants more compile-time safety).
+   - **Tackle features** that are now easier because the structural seams are in place — adding a new message family is now one reducer + one `case` arm; adding a new mode is one file + one map entry; adding a new view region is one file + one App.View call.
