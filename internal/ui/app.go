@@ -72,14 +72,6 @@ const (
 	cacheFreshThreshold = 30 * time.Second
 )
 
-// workspaceStatus caches the latest StatusChangeMsg per team so the
-// status bar can refresh on workspace switch without round-tripping.
-type workspaceStatus struct {
-	Presence   string
-	DNDEnabled bool
-	DNDEndTS   time.Time
-}
-
 // dragState captures an in-progress mouse drag for text selection. The
 // FSM lives in App.Update: MouseClickMsg seeds it, MouseMotionMsg
 // extends, MouseReleaseMsg finalizes (or clears it on a plain click).
@@ -320,11 +312,14 @@ type App struct {
 	themeSaveFn    func(name string, scope themeswitcher.ThemeScope)
 	themeOverrides config.Theme
 
-	// Presence / DND status
-	presenceCustomBuf string                                              // numeric input buffer for custom snooze
-	statusByTeam      map[string]workspaceStatus                          // last known status per workspace
-	setStatusFn       func(action presencemenu.Action, snoozeMinutes int) // callback for API call
-	dndTickerOn       bool                                                // guards against parallel DNDTickMsg chains
+	// presence owns per-workspace presence/DND cache, the DND-tick
+	// guard, and the custom-snooze numeric input buffer. See
+	// internal/ui/presence.go.
+	presence *presenceController
+	// setStatusFn is the callback invoked when the user picks a presence-
+	// menu action; it runs the Slack API call for the active workspace.
+	// Wired by cmd/slk/main.go via SetStatusSetter.
+	setStatusFn func(action presencemenu.Action, snoozeMinutes int)
 
 	// typing owns both inbound typing-indicator state (other users
 	// typing in channels) and outbound typing-send throttle. See
@@ -429,7 +424,7 @@ func NewApp() *App {
 		mouseWheelLines:      3,
 		userNames:            map[string]string{},
 		externalUsers:        map[string]bool{},
-		statusByTeam:         map[string]workspaceStatus{},
+		presence:             newPresenceController(),
 		lastChannelByTeam:    map[string]string{},
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
@@ -1822,11 +1817,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.SetCustomEmoji(msg.CustomEmoji)
 		a.currentUserID = msg.UserID
 		a.activeTeamID = msg.TeamID
-		if st, ok := a.statusByTeam[a.activeTeamID]; ok {
-			a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
-		} else {
-			a.statusbar.SetStatus("", false, time.Time{})
-		}
+		pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
+		a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
 		// Apply per-workspace theme. Must run on Update goroutine so the
 		// component cache invalidations and compose-style refreshes below
 		// take effect on the next render.
@@ -1946,11 +1938,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.SetCustomEmoji(msg.CustomEmoji)
 			a.currentUserID = msg.UserID
 			a.activeTeamID = msg.TeamID
-			if st, ok := a.statusByTeam[a.activeTeamID]; ok {
-				a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
-			} else {
-				a.statusbar.SetStatus("", false, time.Time{})
-			}
+			pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
+			a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
 			a.workspaceRail.SelectByID(msg.TeamID)
 			if len(msg.Channels) > 0 {
 				first := msg.Channels[0]
@@ -2040,19 +2029,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.sidebar.UpdatePresenceByUser(msg.UserID, msg.Presence)
 
 	case StatusChangeMsg:
-		st := workspaceStatus{
-			Presence:   msg.Presence,
-			DNDEnabled: msg.DNDEnabled,
-			DNDEndTS:   msg.DNDEndTS,
-		}
-		a.statusByTeam[msg.TeamID] = st
+		st := a.presence.Set(msg.TeamID, msg.Presence, msg.DNDEnabled, msg.DNDEndTS)
 		if msg.TeamID == a.activeTeamID {
 			a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
 			// Start the once-a-minute countdown tick if DND is active.
-			// Guard with dndTickerOn (mirroring typingTickerOn) so repeated
-			// StatusChangeMsgs don't accumulate parallel tick chains.
-			if st.DNDEnabled && !st.DNDEndTS.IsZero() && time.Now().Before(st.DNDEndTS) && !a.dndTickerOn {
-				a.dndTickerOn = true
+			// ClaimTicker returns true once until ClearTicker is called,
+			// guarding against parallel tick chains accumulating across
+			// repeated StatusChangeMsgs.
+			if st.DNDEnabled && !st.DNDEndTS.IsZero() && time.Now().Before(st.DNDEndTS) && a.presence.ClaimTicker() {
 				cmds = append(cmds, tea.Tick(time.Minute, func(time.Time) tea.Msg {
 					return statusbar.DNDTickMsg{}
 				}))
@@ -2060,22 +2044,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case statusbar.DNDTickMsg:
-		st, ok := a.statusByTeam[a.activeTeamID]
+		pres, dndEnabled, dndEnd, ok := a.presence.Status(a.activeTeamID)
 		if !ok {
-			a.dndTickerOn = false
+			a.presence.ClearTicker()
 			break
 		}
-		if st.DNDEnabled && !st.DNDEndTS.IsZero() && !time.Now().Before(st.DNDEndTS) {
+		if dndEnabled && !dndEnd.IsZero() && !time.Now().Before(dndEnd) {
 			// DND expired locally — flip the flag so the segment falls back to presence.
-			st.DNDEnabled = false
-			st.DNDEndTS = time.Time{}
-			a.statusByTeam[a.activeTeamID] = st
+			st := a.presence.ClearDNDFor(a.activeTeamID)
 			a.statusbar.SetStatus(st.Presence, false, time.Time{})
-			a.dndTickerOn = false
+			a.presence.ClearTicker()
 			break
 		}
-		a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
-		if st.DNDEnabled && !st.DNDEndTS.IsZero() {
+		a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
+		if dndEnabled && !dndEnd.IsZero() {
 			// still in DND — reschedule the tick (dndTickerOn stays true)
 			cmds = append(cmds, tea.Tick(time.Minute, func(time.Time) tea.Msg {
 				return statusbar.DNDTickMsg{}
@@ -2083,7 +2065,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			// Active workspace no longer in DND (e.g. user switched away
 			// from a DND'd workspace). Stop the chain.
-			a.dndTickerOn = false
+			a.presence.ClearTicker()
 		}
 
 	case ToastMsg:
@@ -2306,7 +2288,7 @@ func (a *App) handleNormalMode(msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, a.keys.PresenceMenu):
 		header := a.workspaceNameForActive()
-		pres, dndEnabled, dndEnd := a.activeWorkspaceStatus()
+		pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
 		a.presenceMenu.OpenWith(header, pres, dndEnabled, dndEnd)
 		a.SetMode(ModePresenceMenu)
 
@@ -2757,14 +2739,15 @@ func (a *App) handlePresenceMenuMode(msg tea.KeyMsg) tea.Cmd {
 		a.presenceMenu.Close()
 		// Custom snooze opens a sub-mode instead of firing immediately.
 		if result.Action == presencemenu.ActionCustomSnooze {
-			a.presenceCustomBuf = ""
+			a.presence.ClearSnoozeBuf()
 			a.SetMode(ModePresenceCustomSnooze)
 			return nil
 		}
 		a.SetMode(ModeNormal)
 		// Optimistic UI: update local state + status bar before the API
 		// call returns. The WS echo will reaffirm it.
-		a.applyOptimisticStatus(result.Action, result.SnoozeMinutes)
+		st := a.presence.Apply(a.activeTeamID, result.Action, result.SnoozeMinutes)
+		a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
 		if a.setStatusFn != nil {
 			a.setStatusFn(result.Action, result.SnoozeMinutes)
 		}
@@ -2776,57 +2759,31 @@ func (a *App) handlePresenceMenuMode(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// applyOptimisticStatus updates the App's status cache and status bar
-// based on the picked action, before the API round-trip completes.
-func (a *App) applyOptimisticStatus(action presencemenu.Action, snoozeMinutes int) {
-	st := a.statusByTeam[a.activeTeamID]
-	switch action {
-	case presencemenu.ActionSetActive:
-		st.Presence = "active"
-	case presencemenu.ActionSetAway:
-		st.Presence = "away"
-	case presencemenu.ActionSnooze:
-		st.DNDEnabled = true
-		st.DNDEndTS = time.Now().Add(time.Duration(snoozeMinutes) * time.Minute)
-	case presencemenu.ActionEndDND:
-		st.DNDEnabled = false
-		st.DNDEndTS = time.Time{}
-	}
-	a.statusByTeam[a.activeTeamID] = st
-	a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
-}
-
 func (a *App) handlePresenceCustomSnoozeMode(msg tea.KeyMsg) tea.Cmd {
 	switch msg.Key().Code {
 	case tea.KeyEscape:
-		a.presenceCustomBuf = ""
+		a.presence.ClearSnoozeBuf()
 		a.SetMode(ModeNormal)
 		return nil
 	case tea.KeyEnter:
-		mins, err := strconv.Atoi(a.presenceCustomBuf)
-		a.presenceCustomBuf = ""
+		mins, err := strconv.Atoi(a.presence.SnoozeBuf())
+		a.presence.ClearSnoozeBuf()
 		a.SetMode(ModeNormal)
 		if err != nil || mins <= 0 {
 			a.statusbar.SetToast("Invalid snooze duration")
 			return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return statusbar.CopiedClearMsg{} })
 		}
-		a.applyOptimisticStatus(presencemenu.ActionSnooze, mins)
+		st := a.presence.Apply(a.activeTeamID, presencemenu.ActionSnooze, mins)
+		a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
 		if a.setStatusFn != nil {
 			a.setStatusFn(presencemenu.ActionSnooze, mins)
 		}
 		return nil
 	case tea.KeyBackspace:
-		if len(a.presenceCustomBuf) > 0 {
-			a.presenceCustomBuf = a.presenceCustomBuf[:len(a.presenceCustomBuf)-1]
-		}
+		a.presence.BackspaceSnooze()
 		return nil
 	}
-	r := msg.String()
-	if len(r) == 1 && r[0] >= '0' && r[0] <= '9' {
-		if len(a.presenceCustomBuf) < 6 {
-			a.presenceCustomBuf += r
-		}
-	}
+	a.presence.AppendSnoozeDigit(msg.String())
 	return nil
 }
 
@@ -4266,16 +4223,6 @@ func (a *App) workspaceNameForActive() string {
 	return ""
 }
 
-// activeWorkspaceStatus returns the cached presence/DND state for the
-// active workspace (zero values if none cached yet).
-func (a *App) activeWorkspaceStatus() (string, bool, time.Time) {
-	st, ok := a.statusByTeam[a.activeTeamID]
-	if !ok {
-		return "", false, time.Time{}
-	}
-	return st.Presence, st.DNDEnabled, st.DNDEndTS
-}
-
 // SetThemeSaver sets the callback for saving the theme selection. The
 // callback receives the chosen theme name and the scope (workspace vs.
 // global) so the implementation can route to the correct save target.
@@ -4777,7 +4724,7 @@ func (a *App) View() tea.View {
 	}
 
 	if a.mode == ModePresenceCustomSnooze {
-		screen = presencemenu.CustomSnoozeView(a.width, a.height, screen, a.presenceCustomBuf)
+		screen = presencemenu.CustomSnoozeView(a.width, a.height, screen, a.presence.SnoozeBuf())
 	}
 
 	if a.bootstrap.IsLoading() {

@@ -19,15 +19,15 @@ func TestApplyOptimisticStatusSetActive(t *testing.T) {
 	a.activeTeamID = "T1"
 	// Seed: was previously away with DND on, just to be sure we don't
 	// stomp DND fields with this action.
-	a.statusByTeam["T1"] = workspaceStatus{
+	a.presence.byTeam["T1"] = workspaceStatus{
 		Presence:   "away",
 		DNDEnabled: true,
 		DNDEndTS:   time.Now().Add(5 * time.Minute),
 	}
 
-	a.applyOptimisticStatus(presencemenu.ActionSetActive, 0)
+	a.presence.Apply(a.activeTeamID, presencemenu.ActionSetActive, 0)
 
-	got := a.statusByTeam["T1"]
+	got := a.presence.byTeam["T1"]
 	if got.Presence != "active" {
 		t.Errorf("Presence: want %q, got %q", "active", got.Presence)
 	}
@@ -42,11 +42,11 @@ func TestApplyOptimisticStatusSetActive(t *testing.T) {
 func TestApplyOptimisticStatusSetAway(t *testing.T) {
 	a := NewApp()
 	a.activeTeamID = "T1"
-	a.statusByTeam["T1"] = workspaceStatus{Presence: "active"}
+	a.presence.byTeam["T1"] = workspaceStatus{Presence: "active"}
 
-	a.applyOptimisticStatus(presencemenu.ActionSetAway, 0)
+	a.presence.Apply(a.activeTeamID, presencemenu.ActionSetAway, 0)
 
-	if got := a.statusByTeam["T1"].Presence; got != "away" {
+	if got := a.presence.byTeam["T1"].Presence; got != "away" {
 		t.Errorf("Presence: want %q, got %q", "away", got)
 	}
 }
@@ -54,13 +54,13 @@ func TestApplyOptimisticStatusSetAway(t *testing.T) {
 func TestApplyOptimisticStatusSnoozeSetsDND(t *testing.T) {
 	a := NewApp()
 	a.activeTeamID = "T1"
-	a.statusByTeam["T1"] = workspaceStatus{Presence: "active"}
+	a.presence.byTeam["T1"] = workspaceStatus{Presence: "active"}
 
 	before := time.Now()
-	a.applyOptimisticStatus(presencemenu.ActionSnooze, 30)
+	a.presence.Apply(a.activeTeamID, presencemenu.ActionSnooze, 30)
 	after := time.Now()
 
-	got := a.statusByTeam["T1"]
+	got := a.presence.byTeam["T1"]
 	if !got.DNDEnabled {
 		t.Fatal("expected DNDEnabled=true after Snooze")
 	}
@@ -80,15 +80,15 @@ func TestApplyOptimisticStatusSnoozeSetsDND(t *testing.T) {
 func TestApplyOptimisticStatusEndDNDClearsDND(t *testing.T) {
 	a := NewApp()
 	a.activeTeamID = "T1"
-	a.statusByTeam["T1"] = workspaceStatus{
+	a.presence.byTeam["T1"] = workspaceStatus{
 		Presence:   "active",
 		DNDEnabled: true,
 		DNDEndTS:   time.Now().Add(10 * time.Minute),
 	}
 
-	a.applyOptimisticStatus(presencemenu.ActionEndDND, 0)
+	a.presence.Apply(a.activeTeamID, presencemenu.ActionEndDND, 0)
 
-	got := a.statusByTeam["T1"]
+	got := a.presence.byTeam["T1"]
 	if got.DNDEnabled {
 		t.Error("DNDEnabled must be false after ActionEndDND")
 	}
@@ -106,9 +106,9 @@ func TestApplyOptimisticStatusInitializesMissingTeamEntry(t *testing.T) {
 	a.activeTeamID = "T1"
 	// statusByTeam["T1"] does not exist yet.
 
-	a.applyOptimisticStatus(presencemenu.ActionSetAway, 0)
+	a.presence.Apply(a.activeTeamID, presencemenu.ActionSetAway, 0)
 
-	got, ok := a.statusByTeam["T1"]
+	got, ok := a.presence.byTeam["T1"]
 	if !ok {
 		t.Fatal("expected entry for T1 to be created on first apply")
 	}
@@ -131,7 +131,7 @@ func TestStatusChangeMsgUpdatesPerTeamCache(t *testing.T) {
 		DNDEndTS:   dndEnd,
 	})
 
-	got, ok := a.statusByTeam["T2"]
+	got, ok := a.presence.byTeam["T2"]
 	if !ok {
 		t.Fatal("expected statusByTeam[T2] to be set")
 	}
@@ -139,7 +139,7 @@ func TestStatusChangeMsgUpdatesPerTeamCache(t *testing.T) {
 		t.Errorf("T2 cache mismatch: got %+v", got)
 	}
 	// T1 (active) must not have been written.
-	if _, exists := a.statusByTeam["T1"]; exists {
+	if _, exists := a.presence.byTeam["T1"]; exists {
 		t.Error("active T1 entry should not be created by a T2 status change")
 	}
 }
@@ -157,7 +157,7 @@ func TestStatusChangeMsgForActiveTeamStartsDNDTickerOnce(t *testing.T) {
 		DNDEnabled: true,
 		DNDEndTS:   dndEnd,
 	})
-	if !a.dndTickerOn {
+	if !a.presence.dndTickerOn {
 		t.Fatal("expected dndTickerOn=true after first DND-active StatusChangeMsg")
 	}
 	if cmd == nil {
@@ -188,7 +188,7 @@ func TestStatusChangeMsgExpiredDNDDoesNotStartTicker(t *testing.T) {
 		DNDEnabled: true,
 		DNDEndTS:   time.Now().Add(-1 * time.Minute),
 	})
-	if a.dndTickerOn {
+	if a.presence.dndTickerOn {
 		t.Error("ticker must not start for already-expired DND")
 	}
 	if cmd != nil {
