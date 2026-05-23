@@ -125,7 +125,7 @@ func TestApp_PlainClickOnMessageOpensThread(t *testing.T) {
 
 	fetchedCh := ""
 	fetchedTS := ""
-	a.SetThreadFetcher(func(channelID, threadTS string) tea.Msg {
+	a.setThreadFetcherForTest(func(channelID, threadTS string) tea.Msg {
 		fetchedCh = channelID
 		fetchedTS = threadTS
 		return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: nil}
@@ -169,7 +169,7 @@ func TestApp_PlainClickOnChromeDoesNotOpenThread(t *testing.T) {
 	a.activeChannelID = "C1"
 
 	called := false
-	a.SetThreadFetcher(func(channelID, threadTS string) tea.Msg {
+	a.setThreadFetcherForTest(func(channelID, threadTS string) tea.Msg {
 		called = true
 		return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: nil}
 	})
@@ -203,7 +203,7 @@ func TestApp_DragDoesNotOpenThread(t *testing.T) {
 	a.activeChannelID = "C1"
 
 	called := false
-	a.SetThreadFetcher(func(channelID, threadTS string) tea.Msg {
+	a.setThreadFetcherForTest(func(channelID, threadTS string) tea.Msg {
 		called = true
 		return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: nil}
 	})

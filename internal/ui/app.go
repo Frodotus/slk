@@ -148,16 +148,14 @@ type App struct {
 	// clipboard contents. Tests inject fakes via SetClipboardReader.
 	clipboardRead clipboardReader
 
-	threadFetcher        ThreadFetchFunc
-	threadCacheReader    ThreadCacheReadFunc
-	threadMarker         ThreadMarkFunc
-	threadReplySender    ThreadReplySendFunc
+	// threads is the App's ThreadService collaborator (fetch / mark /
+	// reply / list-fetch + parent-channel last-read lookup for the
+	// unread boundary). See internal/ui/services.go. Defaulted to a
+	// no-op adapter in NewApp so call sites can dispatch without
+	// nil-checks.
+	threads ThreadService
+
 	channelJoiner        JoinChannelFunc
-	threadsListFetcher   ThreadsListFetchFunc
-	// channelLastReadFetcher returns the parent channel's last_read_ts
-	// so the thread panel can render a "── new ──" boundary. Optional —
-	// when nil, the thread panel renders without an unread boundary.
-	channelLastReadFetcher func(channelID string) string
 	threadsDirtyDebounce time.Duration
 	fetchingOlder        bool
 
@@ -341,6 +339,7 @@ func NewApp() *App {
 		preview:              newImagePreviewController(),
 		layout:               newPanelLayout(),
 		reactions:            noopReactionService,
+		threads:              noopThreadService,
 		lastChannelByTeam:    map[string]string{},
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
@@ -1417,22 +1416,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.channelID != a.lastOpenedChannelID || msg.threadTS != a.lastOpenedThreadTS {
 			return a, nil
 		}
-		if a.threadFetcher == nil {
-			return a, nil
-		}
-		fetcher := a.threadFetcher
+		threads := a.threads
 		chID, threadTS := msg.channelID, msg.threadTS
 		var batch []tea.Cmd
-		if a.threadCacheReader != nil {
-			if cached := a.threadCacheReader(chID, threadTS); len(cached) > 1 {
-				replies := cached[1:] // strip parent; reducer expects replies-only
-				ts := threadTS
-				batch = append(batch, func() tea.Msg {
-					return ThreadRepliesLoadedMsg{ThreadTS: ts, Replies: replies}
-				})
-			}
+		if cached := threads.CacheRead(chID, threadTS); len(cached) > 1 {
+			replies := cached[1:] // strip parent; reducer expects replies-only
+			ts := threadTS
+			batch = append(batch, func() tea.Msg {
+				return ThreadRepliesLoadedMsg{ThreadTS: ts, Replies: replies}
+			})
 		}
-		batch = append(batch, func() tea.Msg { return fetcher(chID, threadTS) })
+		batch = append(batch, func() tea.Msg { return threads.Fetch(chID, threadTS) })
 		return a, tea.Batch(batch...)
 
 	case ThreadRepliesLoadedMsg:
@@ -1461,11 +1455,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					latestTS = t
 				}
 			}
-			if a.threadMarker != nil && channelID != "" && msg.ThreadTS != "" {
-				marker := a.threadMarker
+			if channelID != "" && msg.ThreadTS != "" {
+				threads := a.threads
 				chID, threadTS, ts := channelID, msg.ThreadTS, latestTS
 				cmds = append(cmds, func() tea.Msg {
-					marker(chID, threadTS, ts)
+					threads.Mark(chID, threadTS, ts)
 					return nil
 				})
 			}
@@ -1478,10 +1472,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.view = ViewThreads
 		a.sidebar.SetThreadsActive(true)
 		a.focusedPanel = PanelMessages
-		if a.threadsListFetcher != nil && a.activeTeamID != "" {
-			fetcher := a.threadsListFetcher
+		if a.activeTeamID != "" {
+			threads := a.threads
 			team := a.activeTeamID
-			cmds = append(cmds, func() tea.Msg { return fetcher(team) })
+			cmds = append(cmds, func() tea.Msg { return threads.ListFetch(team) })
 		}
 		// Activation is a single event — fire the fetch immediately so the
 		// right thread panel populates without artificial delay.
@@ -1505,10 +1499,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case ThreadsListDirtyMsg:
-		if msg.TeamID == a.activeTeamID && a.threadsListFetcher != nil {
-			fetcher := a.threadsListFetcher
+		if msg.TeamID == a.activeTeamID {
+			threads := a.threads
 			team := a.activeTeamID
-			cmds = append(cmds, func() tea.Msg { return fetcher(team) })
+			cmds = append(cmds, func() tea.Msg { return threads.ListFetch(team) })
 		}
 
 	case SendThreadReplyMsg:
@@ -1530,22 +1524,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ThreadTS:  msg.ThreadTS,
 			})
 		}
-		if a.threadReplySender != nil {
-			sender := a.threadReplySender
-			chID, ts, text := msg.ChannelID, msg.ThreadTS, msg.Text
-			cmds = append(cmds, func() tea.Msg {
-				result := sender(chID, ts, text)
-				switch r := result.(type) {
-				case ThreadReplySentMsg:
-					r.LocalTS = localTS
-					return r
-				case ThreadReplySendFailedMsg:
-					r.LocalTS = localTS
-					return r
-				}
-				return result
-			})
-		}
+		threads := a.threads
+		chID, ts, text := msg.ChannelID, msg.ThreadTS, msg.Text
+		cmds = append(cmds, func() tea.Msg {
+			result := threads.SendReply(chID, ts, text)
+			switch r := result.(type) {
+			case ThreadReplySentMsg:
+				r.LocalTS = localTS
+				return r
+			case ThreadReplySendFailedMsg:
+				r.LocalTS = localTS
+				return r
+			}
+			return result
+		})
 
 	case ThreadReplySentMsg:
 		// chat.postMessage for the thread reply landed. If a "local:..."
@@ -1759,11 +1751,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Kick off an initial threads-list fetch so the sidebar Threads
 		// row badge populates before the user opens the view.
-		if a.threadsListFetcher != nil {
-			fetcher := a.threadsListFetcher
-			team := msg.TeamID
-			cmds = append(cmds, func() tea.Msg { return fetcher(team) })
-		}
+		threads := a.threads
+		team := msg.TeamID
+		cmds = append(cmds, func() tea.Msg { return threads.ListFetch(team) })
 
 	case ReadStateChangedMsg:
 		// Persistent read state changed in the cache. Invalidate the
@@ -1860,11 +1850,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// becomes ready; the result is gated by ThreadsListLoadedMsg's
 		// TeamID == activeTeamID check, so background fetches are
 		// dropped without affecting the active sidebar.
-		if a.threadsListFetcher != nil {
-			fetcher := a.threadsListFetcher
-			team := msg.TeamID
-			cmds = append(cmds, func() tea.Msg { return fetcher(team) })
-		}
+		threads := a.threads
+		team := msg.TeamID
+		cmds = append(cmds, func() tea.Msg { return threads.ListFetch(team) })
 
 	case CustomEmojisLoadedMsg:
 		if msg.TeamID == a.activeTeamID {
@@ -3221,22 +3209,17 @@ func (a *App) openThreadForSelectedMessage() tea.Cmd {
 	a.threadCompose.SetChannel("thread")
 	a.applyThreadUnreadBoundary(a.activeChannelID)
 
-	if a.threadFetcher == nil {
-		return nil
-	}
-	fetcher := a.threadFetcher
+	threads := a.threads
 	chID := a.activeChannelID
 	ts := threadTS
 	var batch []tea.Cmd
-	if a.threadCacheReader != nil {
-		if cached := a.threadCacheReader(chID, ts); len(cached) > 1 {
-			replies := cached[1:] // strip parent; reducer expects replies-only
-			batch = append(batch, func() tea.Msg {
-				return ThreadRepliesLoadedMsg{ThreadTS: ts, Replies: replies}
-			})
-		}
+	if cached := threads.CacheRead(chID, ts); len(cached) > 1 {
+		replies := cached[1:] // strip parent; reducer expects replies-only
+		batch = append(batch, func() tea.Msg {
+			return ThreadRepliesLoadedMsg{ThreadTS: ts, Replies: replies}
+		})
 	}
-	batch = append(batch, func() tea.Msg { return fetcher(chID, ts) })
+	batch = append(batch, func() tea.Msg { return threads.Fetch(chID, ts) })
 	return tea.Batch(batch...)
 }
 
@@ -3402,22 +3385,17 @@ func (a *App) openSelectedThreadCmd(debounce bool) tea.Cmd {
 	if a.threadsView.MarkSelectedRead() {
 		a.sidebar.SetThreadsUnreadCount(a.threadsView.UnreadCount())
 	}
-	if a.threadFetcher == nil {
-		return nil
-	}
-	fetcher := a.threadFetcher
+	threads := a.threads
 	chID, threadTS := sum.ChannelID, sum.ThreadTS
 	if !debounce {
 		var batch []tea.Cmd
-		if a.threadCacheReader != nil {
-			if cached := a.threadCacheReader(chID, threadTS); len(cached) > 1 {
-				replies := cached[1:] // strip parent; reducer expects replies-only
-				batch = append(batch, func() tea.Msg {
-					return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: replies}
-				})
-			}
+		if cached := threads.CacheRead(chID, threadTS); len(cached) > 1 {
+			replies := cached[1:] // strip parent; reducer expects replies-only
+			batch = append(batch, func() tea.Msg {
+				return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: replies}
+			})
 		}
-		batch = append(batch, func() tea.Msg { return fetcher(chID, threadTS) })
+		batch = append(batch, func() tea.Msg { return threads.Fetch(chID, threadTS) })
 		return tea.Batch(batch...)
 	}
 	a.pendingThreadFetchGen++
@@ -3432,10 +3410,10 @@ func (a *App) openSelectedThreadCmd(debounce bool) tea.Cmd {
 // before the first reply the user hasn't seen. No-op when no last-read
 // fetcher is wired (e.g. in tests).
 func (a *App) applyThreadUnreadBoundary(channelID string) {
-	if a.channelLastReadFetcher == nil || channelID == "" {
+	if channelID == "" {
 		return
 	}
-	a.threadPanel.SetUnreadBoundary(a.channelLastReadFetcher(channelID))
+	a.threadPanel.SetUnreadBoundary(a.threads.ChannelLastRead(channelID))
 }
 
 // scheduleThreadsDirty returns a tea.Cmd that fires a ThreadsListDirtyMsg
@@ -3617,31 +3595,14 @@ func (a *App) SetClipboardReader(fn clipboardReader) {
 	a.clipboardRead = fn
 }
 
-// SetThreadFetcher sets the callback used to load thread replies.
-func (a *App) SetThreadFetcher(fn ThreadFetchFunc) {
-	a.threadFetcher = fn
-}
-
-// SetThreadCacheReader sets the callback consulted synchronously when
-// a thread is opened to render cached replies before the network
-// fetch completes. Pass nil to disable cache-first thread rendering.
-func (a *App) SetThreadCacheReader(fn ThreadCacheReadFunc) {
-	a.threadCacheReader = fn
-}
-
-// SetThreadMarker wires the callback that marks a thread as read on Slack's
-// servers. Fired automatically when a thread's replies finish loading after
-// the user opens the thread (from either the messages pane or the threads
-// view). Optional — when nil, only the local UI mark runs.
-func (a *App) SetThreadMarker(fn ThreadMarkFunc) {
-	a.threadMarker = fn
-}
-
-// SetChannelLastReadFetcher wires a callback that returns the parent
-// channel's last_read_ts so the thread panel can show the user where
-// the unread boundary sits when they open a thread. Optional.
-func (a *App) SetChannelLastReadFetcher(fn func(channelID string) string) {
-	a.channelLastReadFetcher = fn
+// SetThreadService wires the App's ThreadService collaborator
+// (fetch / mark / reply / list-fetch + parent-channel last-read).
+// Build one via NewThreadService from a ThreadServiceFuncs bundle.
+func (a *App) SetThreadService(s ThreadService) {
+	if s == nil {
+		s = noopThreadService
+	}
+	a.threads = s
 }
 
 // SetReadStateReader installs a callback the sidebar (and any future
@@ -3671,17 +3632,6 @@ func (a *App) SetChannelVisitRecorder(fn ChannelVisitRecorder) {
 // dropped and skipped.
 func (a *App) SetChannelLookupFunc(fn ChannelLookupFunc) {
 	a.channelLookup = fn
-}
-
-// SetThreadReplySender sets the callback used to send thread replies.
-func (a *App) SetThreadReplySender(fn ThreadReplySendFunc) {
-	a.threadReplySender = fn
-}
-
-// SetThreadsListFetcher wires the function that loads the involved-threads
-// list for a workspace. Called by main.go.
-func (a *App) SetThreadsListFetcher(f ThreadsListFetchFunc) {
-	a.threadsListFetcher = f
 }
 
 func (a *App) SetChannelFinderItems(items []channelfinder.Item) {
