@@ -1,7 +1,7 @@
 # internal/ui/app.go SOLID Refactor — Implementation Plan
 
-> **Status:** Phases 0–2 complete (10 cohesive-state extractions landed). Phases 3–7 ahead.
-> **Branch:** `refactor/app-phase-2-extract-state-objects` (tip; earlier phases on their own branches off main).
+> **Status:** Phases 0–4 complete (10 state extractions + 4 service interfaces + 12 reducer migrations). Phases 5–7 ahead.
+> **Branch:** `refactor/app-phase-2-extract-state-objects` (tip carries Phases 2+3+4; earlier phases on their own branches off main).
 > **Working baseline:** `f2defed` (main as of the rebase, includes upstream wheel-scroll + click-to-thread changes).
 
 **Goal:** Apply SOLID principles to the 6,200-line God Object that is `internal/ui/app.go`. The `App` struct previously held ~95 fields and ~120 methods spanning at least a dozen unrelated concerns (mouse FSM, image preview overlay, navigation history, typing indicators, presence/DND, edit state, ...). Reduce App's surface area, separate concerns into self-contained collaborators, and prepare the file for further structural work (reducer split, mode-handler strategy, View region split).
@@ -23,13 +23,15 @@ Confirmed before Phase 0:
 
 ## Running tally vs original baseline
 
-| | Original | After Phase 2 | After Phase 3 | Δ from original |
-|---|---|---|---|---|
-| `app.go` lines | 6,216 | 5,099 | **4,920** | **−1,296 (−20.8%)** |
-| `App` struct fields | ~95 | ~60 | ~40 | ~−55, consolidated into 10 controllers + 4 service interfaces |
-| `App` callback `Set*` methods | ~28 | ~28 | **4** | **−24** (24 collapsed into 4 service setters) |
-| main.go wiring calls | ~40 | ~40 | ~20 | **−20** |
-| Cohesive new files under `internal/ui/` | 0 | 12 | 14 | services.go + services_helpers_test.go |
+| | Original | After Phase 2 | After Phase 3 | After Phase 4 | Δ from original |
+|---|---|---|---|---|---|
+| `app.go` lines | 6,216 | 5,099 | 4,920 | **3,434** | **−2,782 (−44.7%)** |
+| `Update` body lines | ~1,571 | ~1,571 | ~1,571 | **~85** | **−1,486 (−94.6%)** |
+| `Update` switch arms | ~80 | ~80 | ~80 | **2** (WindowSize, Key) | **−78** |
+| `App` struct fields | ~95 | ~60 | ~40 | ~40 | ~−55, consolidated into 10 controllers + 4 service interfaces |
+| `App` callback `Set*` methods | ~28 | ~28 | 4 | 4 | **−24** (24 collapsed into 4 service setters) |
+| main.go wiring calls | ~40 | ~40 | ~20 | ~20 | **−20** |
+| Cohesive new files under `internal/ui/` | 0 | 12 | 14 | **22** | reducers.go + 7 reducer_*.go (Phase 4) |
 
 ---
 
@@ -177,50 +179,120 @@ App still has ~24 individual `Set*` methods, of which ~4 are workspace-scoped ca
 
 ## Phase 4 — Reducer split (OCP)
 
-**Goal:** Break the giant `Update` switch (~1,600 lines, 75 message cases) into per-feature reducer files. App's `Update` stays as a thin dispatcher; each reducer owns a cohesive subset of message types. Adding a new message type then becomes "add to the relevant reducer's table" instead of "edit the giant switch."
+**Goal:** Break the giant `Update` switch (~1,571 lines, ~80 message cases) into per-feature reducer files. App's `Update` stays as a thin dispatcher; each reducer owns a cohesive subset of message types. Adding a new message type then becomes "add a case to the relevant reducer's switch" instead of "edit the giant switch."
 
-**Status:** **NOT STARTED.**
+**Status:** **COMPLETE** — 12 reducer sub-phases (4a–4m, with 4f deliberately skipped) over commits `f18c4ed..aa2a504`.
 
-**Proposed reducer families (rough sketch):**
+### Phase 4 design choices (decided at start)
 
-| File | Owns these message types |
-|---|---|
-| `reducer_channels.go` | `ChannelSelectedMsg`, `MessagesLoadedMsg`, `OlderMessagesLoadedMsg`, `NewMessageMsg`, `ChannelMarkedReadMsg`, `ChannelMarkedRemoteMsg`, `WSMessageDeletedMsg` |
-| `reducer_send.go` | `SendMessageMsg`, `MessageSentMsg`, `MessageSendFailedMsg`, `EditMessageMsg`, `MessageEditedMsg`, `DeleteMessageMsg`, `MessageDeletedMsg`, `MarkUnreadMsg`, `MessageMarkedUnreadMsg` |
-| `reducer_threads.go` | thread / threads-list / debounce / mark messages |
-| `reducer_reactions.go` | reaction add/remove/sent |
-| `reducer_workspace.go` | `WorkspaceReadyMsg`, `WorkspaceSwitchedMsg`, `WorkspaceFailedMsg`, `ConversationOpenedMsg`, `SectionsRefreshedMsg`, `ChannelMembershipMsg`, `DMNameResolvedMsg`, `UserResolvedMsg`, `UserExternalMsg`, `CustomEmojisLoadedMsg`, `BrowseableChannelsLoadedMsg` |
-| `reducer_presence.go` | `PresenceChangeMsg`, `StatusChangeMsg`, `DNDTickMsg`, `ToastMsg` |
-| `reducer_mouse.go` | `MouseClickMsg`, `MouseMotionMsg`, `MouseReleaseMsg`, `MouseWheelMsg`, `autoScrollTickMsg` |
-| `reducer_status.go` | all `statusbar.*` toast / failure messages |
-| `reducer_upload.go` | `PasteMsg`, `UploadProgressMsg`, `UploadResultMsg` |
-| `reducer_preview.go` | `previewLoadedMsg`, `previewErrorMsg`, `previewSpinnerTickMsg`, `messages.OpenImagePreviewMsg` |
+Three design questions were resolved before any code moved:
 
-**Dispatch table approach:**
+1. **Dispatch shape: per-reducer typed switch + chain-of-responsibility.** Each reducer is a value implementing `Handle(a *App, msg tea.Msg) (tea.Cmd, bool)`; the chain is a variadic call `dispatchReducers(a, msg, a.presence, a.preview, ...)` declared inline in `Update`. Chosen over a `map[reflect.Type]reducer` because it preserves compile-time exhaustiveness and avoids the per-dispatch reflection allocation. Reducers return `(cmd, true)` when they own the message, `(nil, false)` to pass.
+
+2. **Owner-absorbed where possible.** When a message family belongs to a controller already extracted in Phase 2 (presence, preview, drag, typing, bootstrap), the reducer is a method on that controller — state and behavior co-located. When no single owner exists (channels, threads, send, reactions, workspace, mouse, IO/toasts), the reducer is a free `reducerFunc` literal in a per-family `reducer_*.go` file.
+
+3. **Smoke tests via existing coverage.** Existing characterization tests (Phase 0) already dispatch messages through `a.Update(...)`. Once a reducer is wired in, those tests automatically exercise the new path; if the wiring is wrong (reducer not registered, type assertion mismatched), the existing assertions fail. No new smoke tests were added; the existing 24-package suite serves as the regression gate.
+
+### Phase 4 summary table
+
+| Sub | Reducer | Commit | Δ app.go | Arms migrated | Owner |
+|---|---|---|---|---|---|
+| 4a | `presence.Handle` | `f18c4ed` | −22 | 3 (PresenceChange, StatusChange, DNDTick) | `presenceController` (Phase 2f) |
+| 4b | `preview.Handle` | `1974b31` | −54 | 4 (OpenImagePreview, previewSpinnerTick, previewLoaded, previewError) | `imagePreviewController` (Phase 2i) |
+| 4c | `drag.Handle` | `ce9d620` | −111 | 3 (MouseMotion, autoScrollTick, MouseRelease) | `dragSelection` (Phase 2h) |
+| 4d | `typing.Handle` | `c9bdf7f` | −17 | 2 (UserTyping, TypingExpired) | `typingTracker` (Phase 2d) |
+| 4e | `bootstrap.Handle` | `e67d7ab` | −9 | 3 (SpinnerTick, LoadingTimeout, WorkspaceFailed) | `workspaceBootstrap` (Phase 2c) |
+| 4f | — | **SKIPPED** | — | — | `editController` only had 1 related arm (`MessageEditedMsg`); moved into 4i instead |
+| 4g | `reduceReactions` | `d2dfc13` | −13 | 3 (ReactionAdded, ReactionRemoved, ReactionSent) | free reducer |
+| 4h | `reduceThreads` | `dfdf9a4` | −173 | 9 (ThreadMarkedRemote, threadFetchDebounce, ThreadRepliesLoaded, ThreadsViewActivated, ThreadsListLoaded/Dirty, SendThreadReply, ThreadReplySent/Failed) | free reducer |
+| 4i | `reduceSend` | `fcd510e` | −264 | 11 (NewMessage, SendMessage, MessageSent/SendFailed, EditMessage, MessageEdited, DeleteMessage, MessageDeleted, MarkUnread, MessageMarkedUnread, WSMessageDeleted) | free reducer |
+| 4j | `reduceChannels` | `5751271` | −208 | 9 (ChannelSelected, MessagesLoaded, OlderMessagesLoaded, ChannelMarkedRemote/Read, ChannelMembership, ChannelJoined/Failed, BrowseableChannelsLoaded) | free reducer |
+| 4k | `reduceWorkspace` | `9b99659` | −208 | 9 (WorkspaceReady/Switched, ConversationOpened, SectionsRefreshed, DMNameResolved, UserResolved, UserExternal, ReadStateChanged, CustomEmojisLoaded) | free reducer |
+| 4l | `reduceIO` | `300adcd` | −213 | 17 (PasteMsg, UploadProgress/Result, ConnectionState, ToastMsg, editEmptyToast, 3 image/avatar arms, 9 statusbar.* toasts) | free reducer |
+| 4m | `reduceMouse` | `aa2a504` | −199 | 2 (MouseWheel, MouseClick) | free reducer |
+| — | **Totals** | — | **−1,491** | **75 arms** | 5 controller-absorbed + 7 free reducers |
+
+### Files added during Phase 4
+
+- `internal/ui/reducers.go` (79 lines) — `reducer` interface + `reducerFunc` adapter + `dispatchReducers` chain
+- `internal/ui/reducer_reactions.go` (53)
+- `internal/ui/reducer_threads.go` (254)
+- `internal/ui/reducer_send.go` (364)
+- `internal/ui/reducer_channels.go` (297)
+- `internal/ui/reducer_workspace.go` (308)
+- `internal/ui/reducer_io.go` (235)
+- `internal/ui/reducer_mouse.go` (264)
+
+Plus `Handle` methods + tick-cmd helpers added to existing controllers: `presence.go` (+73), `imagepreview.go` (+92), `drag.go` (+167), `typing.go` (+47), `bootstrap.go` (+53).
+
+### Patterns that emerged during Phase 4
+
+Worth naming because they recurred across sub-phases:
+
+1. **Tick-cmd helper next to FSM state.** `previewSpinnerTickCmd` (4b), `autoScrollTickCmd` (4c), `typingExpiredTickCmd` (4d), `spinnerTickCmd` (4e). Each reducer that reschedules its own `tea.Tick(...)` chain gets a named helper, eliminating ~6 duplicates of the same inline `tea.Tick(N*time.Second, func(time.Time) tea.Msg { return XxxTickMsg{} })` literal scattered across `app.go`. One source of truth per chain; the chain's cadence becomes a named constant in the same file.
+
+2. **Big-arm helper extraction.** `reduceNewMessage` / `reduceSendMessage` (4i), `reduceChannelSelected` (4j), `reduceWorkspaceReady` / `reduceWorkspaceSwitched` (4k), `reduceMouseWheel` / `reduceMouseClick` (4m), `reducePaste` (4l). Any reducer arm over ~50 lines or with three or more nested decision branches gets extracted into a package-private helper sitting next to the dispatcher. Keeps the top-level switch readable as a dispatch table.
+
+3. **Toast-with-clear collapse (4l).** The 11 statusbar toast arms each did `a.statusbar.SetToast(text)` + `cmds = append(cmds, tea.Tick(Ns, ... CopiedClearMsg{}))`. Collapsed into two helpers: `copiedClearAfter(d)` returns the tick cmd; `toastWithClear(a, text, d)` does both and returns the cmd. ~70 lines of repetitive `cmds = append` collapsed into one-liners.
+
+4. **Free reducers for cross-cutting families.** When a message family touches 4+ sub-models (channel-select touches sidebar/messagepane/threadPanel/compose/threadCompose/channelFinder/navHistory/statusbar/etc.), no single existing controller is a sensible owner. The reducer lives in its own file and is registered as a `reducerFunc` literal. This is the same heuristic Phase 3 used to skip `WorkspaceService`: "rename without ownership" is worse than "free function with cohesion."
+
+5. **Editor-cancel guard via `editing.Matches`.** Already established in Phase 2e, but Phase 4 made it visible at three more sites: `MessageEditedMsg`, `WSMessageDeletedMsg`, both inside `reduceSend`. Each reads `if a.editing.Matches(channel, ts) { a.cancelEdit() }` — a single named query replacing the three-clause guard that would otherwise repeat.
+
+### Verification after Phase 4
+
+- `go vet ./...` clean · `go build ./...` clean
+- 39/39 packages green, 24/24 in `internal/ui/...`
+- View benchmarks healthy: `BenchmarkAppViewCompose ~4.8ms` (Phase 3 baseline ~4.7ms on same machine), `BenchmarkAppViewIdle ~1.89ms` (unchanged). No measurable regression. Initial single-iteration runs showed a ~30% Compose blip; with 3-iteration warm-up the steady-state is within noise.
+- All Phase 0 characterization tests green; existing test suite serves as the dispatch-wiring smoke test (any reducer accidentally not registered would fail the corresponding `a.Update(...)`-based tests).
+- All upstream-merged tests (click-opens-thread, scroll-decouple, wheel-scroll-config, thread-parent-scrolls) green.
+
+### Final shape of `App.Update`
 
 ```go
-type reducer func(*App, tea.Msg) tea.Cmd
-
-var reducers = map[reflect.Type]reducer{
-    reflect.TypeOf(ChannelSelectedMsg{}): reduceChannelSelected,
-    // ...
-}
-
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-    if cmd, handled := a.preview.HandleMessage(msg); handled { return a, cmd }
-    if cmd, handled := a.modeRouter.Route(msg); handled { return a, cmd }
-    if fn, ok := reducers[reflect.TypeOf(msg)]; ok {
-        return a, fn(a, msg)
+    var cmds []tea.Cmd
+
+    // Phase 4 reducer chain. First reducer to claim the message
+    // short-circuits the rest; unclaimed messages fall through to
+    // the residual switch.
+    if cmd, handled := dispatchReducers(a, msg,
+        a.presence,
+        a.preview,
+        a.drag,
+        a.typing,
+        a.bootstrap,
+        reduceReactions,
+        reduceThreads,
+        reduceSend,
+        reduceChannels,
+        reduceWorkspace,
+        reduceIO,
+        reduceMouse,
+    ); handled {
+        if cmd != nil {
+            cmds = append(cmds, cmd)
+        }
+        return a, tea.Batch(cmds...)
     }
-    return a, nil
+
+    // Image-preview modal key-trap (pre-switch interception).
+    if a.preview.Active() { ... }
+
+    // Residual: only WindowSize + KeyMsg now live here.
+    switch msg := msg.(type) {
+    case tea.WindowSizeMsg:
+        a.width, a.height = msg.Width, msg.Height
+        return a, nil
+    case tea.KeyMsg:
+        cmd := a.handleKey(msg)
+        if cmd != nil { cmds = append(cmds, cmd) }
+    }
+    return a, tea.Batch(cmds...)
 }
 ```
 
-(Reflection overhead is negligible compared to lipgloss rendering, but a typed switch dispatcher is also fine — both shapes are open to new messages without modifying core.)
-
-**Stop-and-reassess rule:** If reducers 1-3 don't yield clear readability/maintainability wins, **stop**. The current monolithic switch is uncomfortable but not broken; a half-finished reducer split is worse than either extreme.
-
-**Expected gain:** `Update` from ~1,600 lines to ~40. Each reducer file is independently reviewable (~150-400 lines). Adding a message type touches one file.
+~85 lines including comments, down from ~1,571. Adding a new message family is now a one-line `reduce*` append to the variadic chain plus a new `reducer_*.go` file — strictly open/closed.
 
 ---
 
@@ -345,7 +417,7 @@ main (f2defed = merged #26 scroll improvements)
  ├── refactor/app-phase-1-extract-msgs-callbacks
  │      └── da1f53b  phase 1 — extract msgs and callbacks
  │
- └── refactor/app-phase-2-extract-state-objects  (tip; carries Phases 2+3)
+ └── refactor/app-phase-2-extract-state-objects  (tip; carries Phases 2+3+4)
         ├── def1ca5  phase 2a — navHistoryStore
         ├── b1ee302  phase 2b — selfSendDedup
         ├── 9c7961f  phase 2c — workspaceBootstrap
@@ -360,10 +432,23 @@ main (f2defed = merged #26 scroll improvements)
         ├── bb0d6dc  phase 3a — ReactionService
         ├── b06e807  phase 3b — ThreadService
         ├── 3d53589  phase 3c — MessageService
-        └── fda2268  phase 3d — ChannelService
+        ├── fda2268  phase 3d — ChannelService
+        ├── 717c413  docs — phase 3 complete
+        ├── f18c4ed  phase 4a — presence reducer + dispatch chain
+        ├── 1974b31  phase 4b — image preview reducer
+        ├── ce9d620  phase 4c — drag-FSM reducer
+        ├── c9bdf7f  phase 4d — typing reducer
+        ├── e67d7ab  phase 4e — bootstrap reducer
+        ├── d2dfc13  phase 4g — reactions reducer (first free reducer)
+        ├── dfdf9a4  phase 4h — threads reducer
+        ├── fcd510e  phase 4i — message-lifecycle reducer
+        ├── 5751271  phase 4j — channels reducer
+        ├── 9b99659  phase 4k — workspace reducer
+        ├── 300adcd  phase 4l — IO / toast / asset-loading reducer
+        └── aa2a504  phase 4m — mouse router reducer (final)
 ```
 
-Phase 0/1 branches still point to their pre-rebase commits. If they need to be PR'd separately to main, re-rebase them onto current main first. The tip branch's name is now slightly stale (it carries 3+ phases) but the contents are unambiguous.
+Phase 4f was deliberately skipped (see Phase 4 summary table for rationale). Phase 0/1 branches still point to their pre-rebase commits. If they need to be PR'd separately to main, re-rebase them onto current main first. The tip branch's name is now stale (it carries Phases 2+3+4, ~30 commits) but the contents are unambiguous.
 
 ---
 
@@ -373,6 +458,6 @@ If picking this up in a new session:
 
 1. `git checkout refactor/app-phase-2-extract-state-objects` (or whatever the current tip branch is).
 2. `git fetch origin && git log --oneline HEAD..origin/main` — check for upstream drift.
-3. If there are new commits on main, rebase: `git rebase origin/main` (the work has rebased cleanly through one main update already; the conflict surface for any future drift is concentrated in `app.go`'s Update arms and the field block).
+3. If there are new commits on main, rebase: `git rebase origin/main`. The conflict surface for any future drift is concentrated in `app.go`'s remaining handler bodies and the per-reducer files in `internal/ui/reducer_*.go`; an upstream change that added a new message arm would land in the `Update` switch where the matching reducer's `Handle` method now is.
 4. Read this doc + skim the most recent phase's commit message for context.
-5. Pick the next phase from the "NOT STARTED" set above. **Phase 4 (reducer split)** is the natural continuation — the giant `Update` switch (~1,600 lines, 75 message cases) is the single biggest remaining concentration of complexity in `app.go`.
+5. Pick the next phase from the "NOT STARTED" set above. **Phase 5 (mode handler strategy)** is the natural continuation — `handleKey`'s mode switch (~50 lines + ~11 `handle*Mode` helpers) is the remaining concentration of dispatch-by-enum on `App`. Phase 6 (View region split) is the other large remaining item; both are independent of each other.
