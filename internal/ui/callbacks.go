@@ -19,6 +19,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"golang.design/x/clipboard"
 
+	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/compose"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/reactionpicker"
@@ -87,8 +88,8 @@ type ThreadReplySendFunc func(channelID, threadTS, text string) tea.Msg
 // Returns the resulting tea.Msg (typically ThreadsListLoadedMsg).
 type ThreadsListFetchFunc func(teamID string) tea.Msg
 
-type ReactionAddFunc func(channelID, messageTS, emoji string) error
-type ReactionRemoveFunc func(channelID, messageTS, emoji string) error
+type ReactionAddFunc func(channelID ids.ChannelID, messageTS ids.MessageTS, emoji string) error
+type ReactionRemoveFunc func(channelID ids.ChannelID, messageTS ids.MessageTS, emoji string) error
 
 // PermalinkFetchFunc is called to fetch the Slack permalink for a message.
 // For thread replies, pass the reply's ts; Slack returns a thread-aware URL.

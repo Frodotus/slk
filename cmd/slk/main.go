@@ -23,6 +23,7 @@ import (
 	"github.com/gammons/slk/internal/config"
 	"github.com/gammons/slk/internal/debuglog"
 	emojiwidth "github.com/gammons/slk/internal/emoji"
+	"github.com/gammons/slk/internal/ids"
 	imgpkg "github.com/gammons/slk/internal/image"
 	"github.com/gammons/slk/internal/notify"
 	"github.com/gammons/slk/internal/service"
@@ -1214,19 +1215,19 @@ func run() error {
 		}))
 
 		app.SetReactionService(ui.NewReactionService(
-			func(channelID, messageTS, emojiName string) error {
+			func(channelID ids.ChannelID, messageTS ids.MessageTS, emojiName string) error {
 				wctx := router.Active()
 				if wctx == nil {
 					return nil
 				}
-				return wctx.Client.AddReaction(ctx, channelID, messageTS, emojiName)
+				return wctx.Client.AddReaction(ctx, string(channelID), string(messageTS), emojiName)
 			},
-			func(channelID, messageTS, emojiName string) error {
+			func(channelID ids.ChannelID, messageTS ids.MessageTS, emojiName string) error {
 				wctx := router.Active()
 				if wctx == nil {
 					return nil
 				}
-				return wctx.Client.RemoveReaction(ctx, channelID, messageTS, emojiName)
+				return wctx.Client.RemoveReaction(ctx, string(channelID), string(messageTS), emojiName)
 			},
 			// LoadFrecent: not workspace-specific, captures only db.
 			func(limit int) []reactionpicker.EmojiEntry {

@@ -22,6 +22,7 @@ import (
 	"github.com/gammons/slk/internal/config"
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/emoji"
+	"github.com/gammons/slk/internal/ids"
 	imgpkg "github.com/gammons/slk/internal/image"
 	"github.com/gammons/slk/internal/ui/channelfinder"
 	"github.com/gammons/slk/internal/ui/channelpicker"
@@ -616,8 +617,8 @@ func (a *App) toggleReactionOnSelectedMessage(emojiName string) tea.Cmd {
 		}
 	}
 	a.updateReactionOnMessage(a.activeChannelID, msg.TS, emojiName, a.currentUserID, remove)
-	channelID := a.activeChannelID
-	ts := msg.TS
+	channelID := ids.ChannelID(a.activeChannelID)
+	ts := ids.MessageTS(msg.TS)
 	if remove {
 		return func() tea.Msg {
 			err := a.reactions.Remove(channelID, ts, emojiName)
@@ -642,9 +643,10 @@ func (a *App) toggleReactionOnSelectedThread(emojiName string) tea.Cmd {
 			break
 		}
 	}
-	channelID := a.threadPanel.ChannelID()
-	a.updateReactionOnMessage(channelID, reply.TS, emojiName, a.currentUserID, remove)
-	ts := reply.TS
+	threadChannelID := a.threadPanel.ChannelID()
+	a.updateReactionOnMessage(threadChannelID, reply.TS, emojiName, a.currentUserID, remove)
+	channelID := ids.ChannelID(threadChannelID)
+	ts := ids.MessageTS(reply.TS)
 	if remove {
 		return func() tea.Msg {
 			err := a.reactions.Remove(channelID, ts, emojiName)
@@ -663,7 +665,7 @@ func (a *App) toggleReactionOnSelectedThread(emojiName string) tea.Cmd {
 // rendered hit rect rather than by selection. Behavior matches
 // toggleReactionOnSelectedMessage: optimistic in-memory update + an
 // async tea.Cmd that issues the Slack add/remove call.
-func (a *App) toggleReactionOnMessageItem(channelID string, msg messages.MessageItem, emojiName string) tea.Cmd {
+func (a *App) toggleReactionOnMessageItem(channelIDStr string, msg messages.MessageItem, emojiName string) tea.Cmd {
 	remove := false
 	for _, r := range msg.Reactions {
 		if r.Emoji == emojiName && r.HasReacted {
@@ -671,8 +673,9 @@ func (a *App) toggleReactionOnMessageItem(channelID string, msg messages.Message
 			break
 		}
 	}
-	a.updateReactionOnMessage(channelID, msg.TS, emojiName, a.currentUserID, remove)
-	ts := msg.TS
+	a.updateReactionOnMessage(channelIDStr, msg.TS, emojiName, a.currentUserID, remove)
+	channelID := ids.ChannelID(channelIDStr)
+	ts := ids.MessageTS(msg.TS)
 	if remove {
 		return func() tea.Msg {
 			err := a.reactions.Remove(channelID, ts, emojiName)

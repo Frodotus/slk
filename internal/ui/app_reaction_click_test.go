@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
 )
 
@@ -68,12 +69,12 @@ func TestApp_ClickOnReactionPillAddsReaction(t *testing.T) {
 	var added []call
 	var removed []call
 	a.SetReactionService(NewReactionService(
-		func(channelID, ts, emoji string) error {
-			added = append(added, call{channelID, ts, emoji})
+		func(channelID ids.ChannelID, ts ids.MessageTS, emoji string) error {
+			added = append(added, call{string(channelID), string(ts), emoji})
 			return nil
 		},
-		func(channelID, ts, emoji string) error {
-			removed = append(removed, call{channelID, ts, emoji})
+		func(channelID ids.ChannelID, ts ids.MessageTS, emoji string) error {
+			removed = append(removed, call{string(channelID), string(ts), emoji})
 			return nil
 		},
 		nil, nil, // no frecent in this test
@@ -142,11 +143,11 @@ func TestApp_ClickOnAlreadyReactedPillRemovesReaction(t *testing.T) {
 	var addCount, removeCount int
 	var lastRemoveEmoji string
 	a.SetReactionService(NewReactionService(
-		func(channelID, ts, emoji string) error {
+		func(channelID ids.ChannelID, ts ids.MessageTS, emoji string) error {
 			addCount++
 			return nil
 		},
-		func(channelID, ts, emoji string) error {
+		func(channelID ids.ChannelID, ts ids.MessageTS, emoji string) error {
 			removeCount++
 			lastRemoveEmoji = emoji
 			return nil

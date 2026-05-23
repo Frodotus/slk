@@ -18,6 +18,8 @@ package ui
 
 import (
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/gammons/slk/internal/ids"
 )
 
 func handleReactionPickerMode(a *App, msg tea.KeyMsg) tea.Cmd {
@@ -38,8 +40,8 @@ func handleReactionPickerMode(a *App, msg tea.KeyMsg) tea.Cmd {
 
 	// Capture values before HandleKey (which may call Close and
 	// reset them).
-	channelID := a.reactionPicker.ChannelID()
-	messageTS := a.reactionPicker.MessageTS()
+	channelIDStr := a.reactionPicker.ChannelID()
+	messageTSStr := a.reactionPicker.MessageTS()
 
 	result := a.reactionPicker.HandleKey(keyStr)
 
@@ -64,9 +66,11 @@ func handleReactionPickerMode(a *App, msg tea.KeyMsg) tea.Cmd {
 	}
 
 	// Optimistic update.
-	a.updateReactionOnMessage(channelID, messageTS, emojiName, a.currentUserID, result.Remove)
+	a.updateReactionOnMessage(channelIDStr, messageTSStr, emojiName, a.currentUserID, result.Remove)
 
 	// Fire API call.
+	channelID := ids.ChannelID(channelIDStr)
+	messageTS := ids.MessageTS(messageTSStr)
 	if result.Remove {
 		return func() tea.Msg {
 			err := a.reactions.Remove(channelID, messageTS, emojiName)

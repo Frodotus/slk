@@ -29,6 +29,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/reactionpicker"
 )
@@ -43,11 +44,11 @@ import (
 type ReactionService interface {
 	// Add adds emoji to messageTS in channelID. Returns an error if
 	// the Slack API call fails; App turns that into a status-bar toast.
-	Add(channelID, messageTS, emoji string) error
+	Add(channelID ids.ChannelID, messageTS ids.MessageTS, emoji string) error
 
 	// Remove removes the current user's emoji reaction from messageTS
 	// in channelID.
-	Remove(channelID, messageTS, emoji string) error
+	Remove(channelID ids.ChannelID, messageTS ids.MessageTS, emoji string) error
 
 	// LoadFrecent returns up to limit emoji entries from the user's
 	// recent-use history, ordered by frecency. May return nil; the
@@ -92,14 +93,14 @@ type reactionAdapter struct {
 	recordFrecent FrecentRecordFunc
 }
 
-func (r reactionAdapter) Add(channelID, messageTS, emoji string) error {
+func (r reactionAdapter) Add(channelID ids.ChannelID, messageTS ids.MessageTS, emoji string) error {
 	if r.add == nil {
 		return nil
 	}
 	return r.add(channelID, messageTS, emoji)
 }
 
-func (r reactionAdapter) Remove(channelID, messageTS, emoji string) error {
+func (r reactionAdapter) Remove(channelID ids.ChannelID, messageTS ids.MessageTS, emoji string) error {
 	if r.remove == nil {
 		return nil
 	}
