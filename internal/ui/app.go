@@ -55,19 +55,6 @@ const (
 	PanelThread
 )
 
-// editState tracks an in-progress message edit. When active, the
-// channel or thread compose box is repurposed: its existing draft is
-// stashed, the message text seeded, and Enter submits an
-// EditMessageMsg instead of sending. Cancellation (Esc, channel
-// switch, panel switch, etc.) restores the stashed draft.
-type editState struct {
-	active       bool
-	channelID    string
-	ts           string
-	panel        Panel // PanelMessages or PanelThread
-	stashedDraft string
-}
-
 // View identifies which "page" the message pane is displaying. The default
 // is ViewChannels (a channel's message history); ViewThreads swaps the
 // pane's contents for the involved-threads list.
@@ -299,8 +286,9 @@ type App struct {
 	frecentRecordFn  FrecentRecordFunc
 	currentUserID    string
 
-	// editing tracks in-progress message edit state. See editState.
-	editing editState
+	// editing tracks in-progress message edit state. See
+	// internal/ui/edit.go.
+	editing *editController
 
 	// Permalink copying
 	permalinkFetchFn PermalinkFetchFunc
@@ -446,6 +434,7 @@ func NewApp() *App {
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
 	}
+	app.editing = newEditController()
 	// typing tracker is referenced by typingOut so it must exist first;
 	// construct outside the literal because struct literals can't
 	// reference sibling fields.
@@ -1463,9 +1452,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Only exit edit mode if this result matches the edit that's
 		// currently in flight. A stale result from a previously
 		// cancelled or replaced edit must not clobber the current one.
-		if a.editing.active &&
-			a.editing.channelID == msg.ChannelID &&
-			a.editing.ts == msg.TS {
+		if a.editing.Matches(msg.ChannelID, msg.TS) {
 			a.cancelEdit()
 		}
 		if msg.Err != nil {
@@ -1719,7 +1706,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// If the deleted message is the one currently being edited,
 		// cancel the edit (the message is gone — submitting would fail).
-		if a.editing.active && a.editing.ts == msg.TS && a.editing.channelID == msg.ChannelID {
+		if a.editing.Matches(msg.ChannelID, msg.TS) {
 			a.cancelEdit()
 		}
 		// If the deleted message was the open thread's parent, close
@@ -2393,10 +2380,10 @@ func (a *App) handleInsertMode(msg tea.KeyMsg) tea.Cmd {
 	if (a.compose.Uploading() || a.threadCompose.Uploading()) && key.Matches(msg, a.keys.Escape) {
 		return a.uploadToastCmd("Upload in progress", 2*time.Second)
 	}
-	if a.editing.active && key.Matches(msg, a.keys.Escape) {
+	if a.editing.IsActive() && key.Matches(msg, a.keys.Escape) {
 		// If a picker is active in the relevant compose, close it
 		// instead of cancelling the edit.
-		if a.editing.panel == PanelThread {
+		if a.editing.Panel() == PanelThread {
 			if a.threadCompose.IsEmojiActive() {
 				a.threadCompose.CloseEmoji()
 				return nil
@@ -2524,7 +2511,7 @@ func (a *App) handleInsertMode(msg tea.KeyMsg) tea.Cmd {
 				}
 				return cmd
 			}
-			if a.editing.active && a.editing.panel == PanelThread {
+			if a.editing.IsActive() && a.editing.Panel() == PanelThread {
 				return a.submitEdit(a.threadCompose.Value(), a.threadCompose.TranslateMentionsForSend(a.threadCompose.Value()))
 			}
 			text := a.threadCompose.Value()
@@ -2571,7 +2558,7 @@ func (a *App) handleInsertMode(msg tea.KeyMsg) tea.Cmd {
 			}
 			return cmd
 		}
-		if a.editing.active && a.editing.panel == PanelMessages {
+		if a.editing.IsActive() && a.editing.Panel() == PanelMessages {
 			return a.submitEdit(a.compose.Value(), a.compose.TranslateMentionsForSend(a.compose.Value()))
 		}
 		text := a.compose.Value()
@@ -4831,18 +4818,19 @@ func (a *App) View() tea.View {
 // cancelEdit exits edit mode, restoring the stashed draft to its
 // source compose. Safe to call when no edit is active (no-op).
 func (a *App) cancelEdit() {
-	if !a.editing.active {
+	if !a.editing.IsActive() {
 		return
 	}
-	switch a.editing.panel {
+	stashed := a.editing.StashedDraft()
+	switch a.editing.Panel() {
 	case PanelMessages:
-		a.compose.SetValue(a.editing.stashedDraft)
+		a.compose.SetValue(stashed)
 		a.compose.SetPlaceholderOverride("")
 	case PanelThread:
-		a.threadCompose.SetValue(a.editing.stashedDraft)
+		a.threadCompose.SetValue(stashed)
 		a.threadCompose.SetPlaceholderOverride("")
 	}
-	a.editing = editState{}
+	a.editing.Clear()
 	a.SetMode(ModeNormal)
 	a.compose.Blur()
 	a.threadCompose.Blur()
@@ -4886,7 +4874,7 @@ const maxAttachmentSize = 10 * 1024 * 1024 // 10 MB cap
 // dispatch, the compose's uploading flag is set so the UI can show
 // progress; the actual UploadResultMsg arm in Update clears it.
 func (a *App) submitWithAttachments(c *compose.Model) tea.Cmd {
-	if a.editing.active {
+	if a.editing.IsActive() {
 		return a.uploadToastCmd("Cannot attach files to an edit (send a new message)", 3*time.Second)
 	}
 	attachments := c.Attachments()
@@ -5033,13 +5021,7 @@ func (a *App) beginEditOfSelected() tea.Cmd {
 		a.threadCompose.SetPlaceholderOverride("Editing message — Enter to save, Esc to cancel")
 	}
 
-	a.editing = editState{
-		active:       true,
-		channelID:    channelID,
-		ts:           ts,
-		panel:        panel,
-		stashedDraft: stashed,
-	}
+	a.editing.Begin(channelID, ts, panel, stashed)
 	a.SetMode(ModeInsert)
 	a.focusedPanel = panel
 	if panel == PanelThread {
@@ -5253,8 +5235,8 @@ func (a *App) submitEdit(rawValue, translated string) tea.Cmd {
 			return editEmptyToastMsg{}
 		}
 	}
-	chID := a.editing.channelID
-	ts := a.editing.ts
+	chID := a.editing.ChannelID()
+	ts := a.editing.TS()
 	return func() tea.Msg {
 		return EditMessageMsg{
 			ChannelID: chID,
