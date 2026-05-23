@@ -1003,45 +1003,7 @@ func (a *App) handleThemeSwitcherMode(msg tea.KeyMsg) tea.Cmd {
 
 // handleHelpMode moved to mode_help.go (Phase 5c).
 
-func (a *App) handlePresenceMenuMode(msg tea.KeyMsg) tea.Cmd {
-	keyStr := msg.String()
-	switch msg.Key().Code {
-	case tea.KeyEnter:
-		keyStr = "enter"
-	case tea.KeyEscape:
-		keyStr = "esc"
-	case tea.KeyUp:
-		keyStr = "up"
-	case tea.KeyDown:
-		keyStr = "down"
-	case tea.KeyBackspace:
-		keyStr = "backspace"
-	}
-
-	result := a.presenceMenu.HandleKey(keyStr)
-	if result != nil {
-		a.presenceMenu.Close()
-		// Custom snooze opens a sub-mode instead of firing immediately.
-		if result.Action == presencemenu.ActionCustomSnooze {
-			a.presence.ClearSnoozeBuf()
-			a.SetMode(ModePresenceCustomSnooze)
-			return nil
-		}
-		a.SetMode(ModeNormal)
-		// Optimistic UI: update local state + status bar before the API
-		// call returns. The WS echo will reaffirm it.
-		st := a.presence.Apply(a.activeTeamID, result.Action, result.SnoozeMinutes)
-		a.statusbar.SetStatus(st.Presence, st.DNDEnabled, st.DNDEndTS)
-		if a.setStatusFn != nil {
-			a.setStatusFn(result.Action, result.SnoozeMinutes)
-		}
-		return nil
-	}
-	if !a.presenceMenu.IsVisible() {
-		a.SetMode(ModeNormal)
-	}
-	return nil
-}
+// handlePresenceMenuMode moved to mode_presence_menu.go (Phase 5f).
 
 // handlePresenceCustomSnoozeMode moved to mode_presence_snooze.go (Phase 5d).
 
