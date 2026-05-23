@@ -72,27 +72,6 @@ const (
 	cacheFreshThreshold = 30 * time.Second
 )
 
-// dragState captures an in-progress mouse drag for text selection. The
-// FSM lives in App.Update: MouseClickMsg seeds it, MouseMotionMsg
-// extends, MouseReleaseMsg finalizes (or clears it on a plain click).
-//
-// autoScrollActive is reserved for Task 9 (edge auto-scroll) and is
-// declared here so that future task can wire it in without re-touching
-// this struct definition.
-type dragState struct {
-	panel            Panel // PanelMessages or PanelThread; PanelWorkspace == idle
-	pressX, pressY   int
-	lastX, lastY     int
-	moved            bool
-	autoScrollActive bool
-	// clickedMessage is set on press when ClickAt on the messages pane
-	// reported a hit on a real message row (i.e. not chrome / empty
-	// space). MouseReleaseMsg consults it: a plain click (no motion)
-	// that landed on a message opens that message's thread, mirroring
-	// the Enter keypress. Cleared by clearing the whole dragState.
-	clickedMessage bool
-}
-
 // openThreadDebounceDelay is how long openSelectedThreadCmd waits after a
 // j/k key event before firing the conversations.replies HTTP call. Held-key
 // bursts coalesce into a single fetch against whichever row the cursor
@@ -311,9 +290,10 @@ type App struct {
 	// in-channel load spinner; advanced by SpinnerTickMsg.
 	spinnerFrame int
 
-	// Mouse drag selection FSM (set by MouseClickMsg, advanced by
-	// MouseMotionMsg, drained by MouseReleaseMsg).
-	drag dragState
+	// drag owns the mouse-drag selection FSM (set by MouseClickMsg,
+	// advanced by MouseMotionMsg, drained by MouseReleaseMsg). See
+	// internal/ui/drag.go.
+	drag *dragState
 
 	// imageFetcher is the inline-image fetcher shared with the messages
 	// pane; the App uses it to load the larger thumb when the user
@@ -378,6 +358,7 @@ func NewApp() *App {
 		externalUsers:        map[string]bool{},
 		presence:             newPresenceController(),
 		renderCache:          newPanelRenderCache(),
+		drag:                 newDragState(),
 		lastChannelByTeam:    map[string]string{},
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
@@ -639,13 +620,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-				a.drag = dragState{panel: PanelMessages, pressX: px, pressY: py, lastX: px, lastY: py}
+				a.drag.Begin(PanelMessages, px, py)
 				a.messagepane.BeginSelectionAt(py, px)
 				// Remember whether this press actually landed on a message
 				// row -- MouseReleaseMsg uses this to decide whether a plain
 				// click (no drag) should open the message's thread (mirrors
 				// pressing Enter on the selected message).
-				a.drag.clickedMessage = a.messagepane.ClickAt(py)
+				a.drag.SetClickedMessage(a.messagepane.ClickAt(py))
 			}
 		} else if a.threadVisible && x < a.layoutThreadEnd {
 			a.focusedPanel = PanelThread
@@ -661,7 +642,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return a, a.toggleReactionOnMessageItem(a.threadPanel.ChannelID(), replies[hitReplyIdx], emojiName)
 					}
 				}
-				a.drag = dragState{panel: PanelThread, pressX: px, pressY: py, lastX: px, lastY: py}
+				a.drag.Begin(PanelThread, px, py)
 				a.threadPanel.BeginSelectionAt(py, px)
 				a.threadPanel.ClickAt(py)
 			}
@@ -674,36 +655,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button != tea.MouseLeft {
 			break
 		}
-		if a.drag.panel != PanelMessages && a.drag.panel != PanelThread {
+		if !a.drag.IsActive() {
 			break
 		}
 		panel, px, py, _ := a.panelAt(msg.X, msg.Y)
 		// Clamp to the originating pane: if the cursor leaves the pane,
 		// pin extension at the last known coordinates inside it.
-		if panel != a.drag.panel {
-			px, py = a.drag.lastX, a.drag.lastY
-		}
-		a.drag.lastX, a.drag.lastY = px, py
-		a.drag.moved = true
-		switch a.drag.panel {
+		px, py = a.drag.Extend(panel, px, py)
+		switch a.drag.Panel() {
 		case PanelMessages:
 			a.messagepane.ExtendSelectionAt(py, px)
 		case PanelThread:
 			a.threadPanel.ExtendSelectionAt(py, px)
 		}
 		// If the cursor is at the top/bottom edge of the originating pane,
-		// schedule an auto-scroll tick. The autoScrollActive gate ensures
-		// only one tick is in-flight at a time -- otherwise every motion
-		// event would queue another timer.
+		// schedule an auto-scroll tick. ClaimAutoScroll returns true once
+		// until ClearAutoScroll resets it, guarding against parallel tick
+		// chains accumulating.
 		var hint int
-		switch a.drag.panel {
+		switch a.drag.Panel() {
 		case PanelMessages:
 			hint = a.messagepane.ScrollHintForDrag(py)
 		case PanelThread:
 			hint = a.threadPanel.ScrollHintForDrag(py)
 		}
-		if hint != 0 && !a.drag.autoScrollActive {
-			a.drag.autoScrollActive = true
+		if hint != 0 && a.drag.ClaimAutoScroll() {
 			cmds = append(cmds, tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg {
 				return autoScrollTickMsg{}
 			}))
@@ -711,38 +687,39 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case autoScrollTickMsg:
 		// If the drag ended (release clears a.drag), self-terminate.
-		if a.drag.panel != PanelMessages && a.drag.panel != PanelThread {
-			a.drag.autoScrollActive = false
+		if !a.drag.IsActive() {
+			a.drag.ClearAutoScroll()
 			break
 		}
+		lastX, lastY := a.drag.LastPos()
 		var hint int
-		switch a.drag.panel {
+		switch a.drag.Panel() {
 		case PanelMessages:
-			hint = a.messagepane.ScrollHintForDrag(a.drag.lastY)
+			hint = a.messagepane.ScrollHintForDrag(lastY)
 		case PanelThread:
-			hint = a.threadPanel.ScrollHintForDrag(a.drag.lastY)
+			hint = a.threadPanel.ScrollHintForDrag(lastY)
 		}
 		if hint == 0 {
 			// Cursor left the edge -- stop ticking. Re-entering the edge
 			// in a future motion event will re-arm the loop.
-			a.drag.autoScrollActive = false
+			a.drag.ClearAutoScroll()
 			break
 		}
-		switch a.drag.panel {
+		switch a.drag.Panel() {
 		case PanelMessages:
 			if hint < 0 {
 				a.messagepane.ScrollUp(1)
 			} else {
 				a.messagepane.ScrollDown(1)
 			}
-			a.messagepane.ExtendSelectionAt(a.drag.lastY, a.drag.lastX)
+			a.messagepane.ExtendSelectionAt(lastY, lastX)
 		case PanelThread:
 			if hint < 0 {
 				a.threadPanel.ScrollUp(1)
 			} else {
 				a.threadPanel.ScrollDown(1)
 			}
-			a.threadPanel.ExtendSelectionAt(a.drag.lastY, a.drag.lastX)
+			a.threadPanel.ExtendSelectionAt(lastY, lastX)
 		}
 		// Schedule the next tick. autoScrollActive remains true.
 		cmds = append(cmds, tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg {
@@ -787,13 +764,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseReleaseMsg:
-		if a.drag.panel != PanelMessages && a.drag.panel != PanelThread {
+		if !a.drag.IsActive() {
 			break
 		}
-		moved := a.drag.moved
-		panel := a.drag.panel
-		clickedMessage := a.drag.clickedMessage
-		a.drag = dragState{}
+		moved, panel, clickedMessage := a.drag.Finish()
 		if !moved {
 			// Plain click — drop any previous pinned selection.
 			switch panel {
