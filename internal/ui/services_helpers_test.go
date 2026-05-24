@@ -94,10 +94,4 @@ func (a *App) setChannelMembershipFetcherForTest(fn func(channelID ids.ChannelID
 	a.SetChannelService(NewChannelService(fns))
 }
 
-func (a *App) setChannelJoinerForTest(fn JoinChannelFunc) {
-	fns := channelFuncsForTest(a)
-	fns.Join = fn
-	a.SetChannelService(NewChannelService(fns))
-}
-
 

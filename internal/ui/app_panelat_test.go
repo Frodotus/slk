@@ -98,18 +98,22 @@ func TestPanelAtSidebarHiddenFallsThroughToMessages(t *testing.T) {
 
 func TestPanelAtMessagesPaneStripsBorderOffsets(t *testing.T) {
 	a := newPanelAtApp()
-	// First column inside the messages band: x=layoutSidebarEnd=25.
-	// The reported paneX subtracts the sidebarEnd AND the left border
-	// (1 col); paneY subtracts the top border (1 row).
+	// First column at the messages band boundary: x=layoutSidebarEnd=25.
+	// The reported paneX is `x - sidebarEnd - 1` (sidebarEnd offset +
+	// left-border column). For x=sidebarEnd=25 this resolves to -1,
+	// indicating the click landed on the border column rather than on
+	// content. paneY similarly subtracts the top-border row.
+	const wantPx = -1 // 25 (input x) - 25 (sidebarEnd) - 1 (left border)
+	const wantPy = 6  // 7  (input y) - 1  (top border)
 	panel, px, py, ok := a.panelAt(25, 7)
 	if !ok || panel != PanelMessages {
 		t.Fatalf("panel/ok: want (PanelMessages,true), got (%v,%v)", panel, ok)
 	}
-	if px != 25-25-1 {
-		t.Errorf("paneX at x=25: want %d, got %d", 25-25-1, px)
+	if px != wantPx {
+		t.Errorf("paneX at x=25: want %d, got %d", wantPx, px)
 	}
-	if py != 7-1 {
-		t.Errorf("paneY at y=7: want %d, got %d", 7-1, py)
+	if py != wantPy {
+		t.Errorf("paneY at y=7: want %d, got %d", wantPy, py)
 	}
 }
 
