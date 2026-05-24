@@ -147,7 +147,7 @@ This task does *two* things deliberately bundled: it (a) extracts the inline "vi
 
 - [ ] **Step 2: Refactor `View()` to use the helper**
 
-  At `internal/ui/sidebar/model.go:1132`, replace:
+  In the `View()` render loop in `internal/ui/sidebar/model.go`, replace:
 
   ```go
   hasUnread := readState[item.ID].HasUnread && !item.IsMuted
@@ -412,7 +412,7 @@ The only state added to `App` is one cached string. No new reader callbacks, no 
 
 - [ ] **Step 1: Add `windowTitle` field**
 
-  In the `App struct` block (`internal/ui/app.go:701`), near the other display-cache fields:
+  In the `App` struct block, alongside the other "current context" fields (next to `activeTeamID`):
 
   ```go
       // windowTitle is the cached terminal-title string. Computed by
@@ -450,7 +450,7 @@ The only state added to `App` is one cached string. No new reader callbacks, no 
 
 - [ ] **Step 1: Extend `notifyReadStateChanged` to compute and cache the title**
 
-  Replace the existing body at `internal/ui/app.go:5942-5945`:
+  Replace the existing body of `notifyReadStateChanged`:
 
   ```go
   func (a *App) notifyReadStateChanged() {
@@ -469,23 +469,15 @@ The only state added to `App` is one cached string. No new reader callbacks, no 
 
 - [ ] **Step 2: Set `WindowTitle` in `View()`**
 
-  Locate `func (a *App) View() tea.View` (`internal/ui/app.go:5252`). Two return sites need the field set:
+  Locate `func (a *App) View() tea.View`. Two return sites need the field set:
 
-  - The early-return for pre-layout (`a.width == 0 || a.height == 0`): set `v.WindowTitle = a.windowTitle` before `return v`.
-  - The main return at end of the function: same. Find the final `tea.View` value being returned (search for `return tea.View{` or `return v` near end of function) and apply the field assignment.
+  - The early-return for pre-layout (before the terminal size is known): set `v.WindowTitle = a.windowTitle` before `return v`.
+  - The main return at end of the function: same. Find the final `tea.View` value being returned (search for `return v` near end of function) and apply the field assignment.
 
-  Example for the early-return branch:
+  Example for the early-return branch. The pre-layout fallback is extracted into `renderEarlyFallback()` (see `internal/ui/view_early.go`), so the title is set on the returned view at the call site:
 
   ```go
-      if a.width == 0 || a.height == 0 {
-          var screen string
-          if a.loading {
-              screen = a.renderLoadingOverlay(80, 24)
-          } else {
-              screen = "Initializing..."
-          }
-          v := tea.NewView(screen)
-          v.AltScreen = true
+      if v, handled := a.renderEarlyFallback(); handled {
           v.WindowTitle = a.windowTitle
           return v
       }
@@ -515,7 +507,7 @@ The unit-level coverage in Tasks 1–3 already proves the pieces. The integratio
   - `notifyReadStateChanged` populates `a.windowTitle` to the expected string when the active workspace has N unreads and 0/M other workspaces have unreads.
   - Pre-bootstrap (`activeTeamID == ""`) yields `slk`.
   - Muted channels are excluded from the active count (cross-check: same item set passed to sidebar produces both the expected count and the expected dot population).
-  - `App.View()` returns a `tea.View` whose `WindowTitle == a.windowTitle` — covered in both the pre-layout (`width == 0`) and main branch.
+  - `App.View()` returns a `tea.View` whose `WindowTitle == a.windowTitle` — covered in both the pre-layout fallback and the main branch.
 
   Most of the per-case format verification is already in `TestComputeWindowTitle`; the integration test's job is to verify the *wiring*, not re-test the formatting.
 

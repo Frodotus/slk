@@ -10,7 +10,7 @@ The terminal window title is the natural place to expose this signal. It is alre
 
 ## Format
 
-Workspace identity uses the same two-letter initials the workspace rail renders (`internal/ui/workspace/model.go:185`, `WorkspaceInitials`). Followed by an optional count of channels-with-unreads in the active workspace, followed by an optional cross-workspace overflow marker.
+Workspace identity uses the same two-letter initials the workspace rail renders (`WorkspaceInitials` in `internal/ui/workspace/model.go`). Followed by an optional count of channels-with-unreads in the active workspace, followed by an optional cross-workspace overflow marker.
 
 | State | Title |
 |---|---|
@@ -36,7 +36,7 @@ Worst-case width: with the maximum reasonable values for both numbers (`(99) +99
 
 Bubbletea v2's `tea.View` struct exposes a `WindowTitle string` field. The renderer (`charm.land/bubbletea/v2@v2.0.6/cursed_renderer.go:128-129,189-191,372-374`) emits `ansi.SetWindowTitle()` whenever the value changes between renders. This is the entire transport — no manual escape emission, no separate `tea.Cmd`, no goroutine.
 
-The unread state already drives a single in-app event: `ReadStateChangedMsg` (`internal/ui/app.go:263`) is sent by every read-state mutator (`cmd/slk/main.go:2803, 3086`; `cmd/slk/reconnect_backfill.go:137`) and handled by `App.Update` at `app.go:2460`, which calls `notifyReadStateChanged` (`app.go:5942`). That function currently invalidates the sidebar cache and refreshes the workspace rail; this design adds one more line to it: update a cached `windowTitle` field on `App`.
+The unread state already drives a single in-app event: `ReadStateChangedMsg` (declared in `internal/ui/app.go`) is sent by every read-state mutator (in `cmd/slk/main.go` and `cmd/slk/reconnect_backfill.go`) and handled by `App.Update`, which calls `notifyReadStateChanged`. That function currently invalidates the sidebar cache and refreshes the workspace rail; this design adds one more line to it: update a cached `windowTitle` field on `App`.
 
 ```go
 // internal/ui/app.go
@@ -107,11 +107,11 @@ func formatTitle(initials string, active, other int) string {
 }
 ```
 
-Both DB calls are already used elsewhere in the render path (`cmd/slk/main.go:875, 884`); no new query surface. Errors are logged and the title degrades to the initials-only form rather than failing. The `WorkspaceInitials` helper already handles edge cases (empty name → `"?"`, single-letter names, multi-word names).
+Both DB calls are already used elsewhere in the render path (in `cmd/slk/main.go`); no new query surface. Errors are logged and the title degrades to the initials-only form rather than failing. The `WorkspaceInitials` helper already handles edge cases (empty name → `"?"`, single-letter names, multi-word names).
 
 ## Muted channels
 
-Channels marked muted in Slack already have their `HasUnread` flag stored at the DB level (the flag is set by the same write paths regardless of mute state), but the sidebar suppresses the dot for muted channels at render time using its `ChannelItem.IsMuted` field (`internal/ui/sidebar/model.go:1132`).
+Channels marked muted in Slack already have their `HasUnread` flag stored at the DB level (the flag is set by the same write paths regardless of mute state), but the sidebar suppresses the dot for muted channels at render time using its `ChannelItem.IsMuted` field (`internal/ui/sidebar/model.go`).
 
 For the **active-workspace count** (the `(N)` portion), the title filters mute the same way: a new accessor on `sidebar.Model` reads the installed read-state callback, iterates the sidebar's items, and counts entries where `state[id].HasUnread && !item.IsMuted`. The sidebar already has both inputs in hand at render time; exposing the count is a one-method addition. This guarantees `(N)` matches the sidebar dot population exactly — no "title says 3 but I only see 2 dots."
 
