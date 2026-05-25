@@ -94,3 +94,92 @@ func (m *Model) setQuery(q string) {
 	m.highlight = 0
 	m.filter()
 }
+
+// HandleKey processes a single key event. The string form mirrors the
+// other picker packages (channelfinder, mentionpicker): "up", "down",
+// "ctrl+n", "ctrl+p", "backspace", "esc", "enter", "tab", " ", or
+// any single printable ASCII character.
+//
+// Returns a non-nil Result when the user submits the picker; the
+// caller (the mode handler) closes the picker and dispatches the
+// conversations.open call.
+//
+// This task wires the navigation arms only. Selection (Space/Tab)
+// lands in this task too; submit semantics (Enter) land in Task 5.
+func (m *Model) HandleKey(keyStr string) *Result {
+	switch keyStr {
+	case "down", "ctrl+n":
+		if m.highlight < len(m.filtered)-1 {
+			m.highlight++
+		}
+		return nil
+	case "up", "ctrl+p":
+		if m.highlight > 0 {
+			m.highlight--
+		}
+		return nil
+	case " ", "tab":
+		m.toggleHighlightedSelection()
+		return nil
+	case "backspace":
+		m.handleBackspace()
+		return nil
+	}
+
+	// Single printable ASCII rune -> append to query.
+	if len(keyStr) == 1 && keyStr[0] >= 33 && keyStr[0] <= 126 {
+		m.query += keyStr
+		m.highlight = 0
+		m.filter()
+	}
+	return nil
+}
+
+// toggleHighlightedSelection adds or removes the currently-highlighted
+// user from the pill bar. No-op when nothing is highlighted, when the
+// pill bar is at MaxRecipients capacity, or when the highlighted user
+// is already selected (in which case it removes them).
+func (m *Model) toggleHighlightedSelection() {
+	if m.highlight < 0 || m.highlight >= len(m.filtered) {
+		return
+	}
+	userID := m.users[m.filtered[m.highlight]].ID
+	if _, already := m.selected[userID]; already {
+		delete(m.selected, userID)
+		return
+	}
+	if len(m.selected) >= MaxRecipients {
+		return
+	}
+	m.selected[userID] = struct{}{}
+}
+
+// handleBackspace deletes the last rune of the query. If the query is
+// already empty AND the pill bar is non-empty, it removes the LAST
+// pill instead — letting the user erase a wrong recipient without
+// reaching for the mouse.
+func (m *Model) handleBackspace() {
+	if len(m.query) > 0 {
+		m.query = m.query[:len(m.query)-1]
+		m.highlight = 0
+		m.filter()
+		return
+	}
+	if len(m.selected) == 0 {
+		return
+	}
+	// No pill order is recorded; we use the last user ID inserted
+	// into the selected set. Since Go map iteration is randomized, we
+	// instead pop the one that appears last in m.users order — this
+	// gives the user a stable, predictable "remove most recently
+	// added" behavior tied to the user list order rather than a
+	// hidden insertion order. (Alternative would be a slice of IDs;
+	// YAGNI — a single backspace mid-flow is rare.)
+	for i := len(m.users) - 1; i >= 0; i-- {
+		id := m.users[i].ID
+		if _, ok := m.selected[id]; ok {
+			delete(m.selected, id)
+			return
+		}
+	}
+}

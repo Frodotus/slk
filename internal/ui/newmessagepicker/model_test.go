@@ -1,6 +1,9 @@
 package newmessagepicker
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func testUsers() []User {
 	return []User{
@@ -210,5 +213,171 @@ func TestFilter_RecencyTieBreaksWithinSameTier(t *testing.T) {
 
 	if m.users[m.filtered[0]].ID != "U2" {
 		t.Errorf("higher-recency match should come first, got %s", m.users[m.filtered[0]].ID)
+	}
+}
+
+func TestHandleKey_DownMovesHighlight(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	// 5 users, highlight starts at 0.
+	m.HandleKey("down")
+	if m.highlight != 1 {
+		t.Errorf("expected highlight=1 after down, got %d", m.highlight)
+	}
+}
+
+func TestHandleKey_UpMovesHighlight(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey("down")
+	m.HandleKey("down")
+	m.HandleKey("up")
+	if m.highlight != 1 {
+		t.Errorf("expected highlight=1 after down,down,up, got %d", m.highlight)
+	}
+}
+
+func TestHandleKey_DownClampsAtEnd(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	for i := 0; i < 20; i++ {
+		m.HandleKey("down")
+	}
+	if m.highlight != len(m.filtered)-1 {
+		t.Errorf("expected highlight clamped at %d, got %d", len(m.filtered)-1, m.highlight)
+	}
+}
+
+func TestHandleKey_UpClampsAtStart(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey("up")
+	if m.highlight != 0 {
+		t.Errorf("expected highlight=0 clamped, got %d", m.highlight)
+	}
+}
+
+func TestHandleKey_CtrlNAndCtrlPAliasNavigation(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey("ctrl+n")
+	if m.highlight != 1 {
+		t.Errorf("ctrl+n should be alias for down")
+	}
+	m.HandleKey("ctrl+p")
+	if m.highlight != 0 {
+		t.Errorf("ctrl+p should be alias for up")
+	}
+}
+
+func TestHandleKey_PrintableRuneAppendsToQueryAndRefilters(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey("a")
+	m.HandleKey("l")
+	m.HandleKey("i")
+	if m.query != "ali" {
+		t.Errorf("expected query=ali, got %q", m.query)
+	}
+	if len(m.filtered) == 0 || m.users[m.filtered[0]].ID != "U1" {
+		t.Errorf("expected Alice (U1) first, got %v", m.filtered)
+	}
+}
+
+func TestHandleKey_BackspaceRemovesLastRune(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey("a")
+	m.HandleKey("l")
+	m.HandleKey("backspace")
+	if m.query != "a" {
+		t.Errorf("expected query=a after backspace, got %q", m.query)
+	}
+}
+
+func TestHandleKey_SpaceTogglesHighlightedUserIntoSelection(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	// highlight starts at 0 -> Alice (U1)
+
+	m.HandleKey(" ")
+	if _, ok := m.selected["U1"]; !ok {
+		t.Error("expected U1 in selection after space")
+	}
+	if len(m.selected) != 1 {
+		t.Errorf("expected 1 selection, got %d", len(m.selected))
+	}
+}
+
+func TestHandleKey_TabAliasesSpace(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey("tab")
+	if _, ok := m.selected["U1"]; !ok {
+		t.Error("expected U1 in selection after tab")
+	}
+}
+
+func TestHandleKey_SpaceOnSelectedRemovesIt(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey(" ")
+	m.HandleKey(" ")
+	if _, ok := m.selected["U1"]; ok {
+		t.Error("expected U1 to be removed after second space")
+	}
+}
+
+func TestHandleKey_SpaceCapsAtMaxRecipients(t *testing.T) {
+	users := make([]User, 10)
+	for i := range users {
+		users[i] = User{
+			ID:          fmt.Sprintf("U%d", i),
+			DisplayName: fmt.Sprintf("User %d", i),
+			Username:    fmt.Sprintf("u%d", i),
+		}
+	}
+	m := New()
+	m.SetUsers(users)
+	m.Open()
+	// Select 8 users by hitting space then down 8 times.
+	for i := 0; i < 8; i++ {
+		m.HandleKey(" ")
+		m.HandleKey("down")
+	}
+	if len(m.selected) != 8 {
+		t.Fatalf("expected 8 selections, got %d", len(m.selected))
+	}
+	// 9th selection attempt must be a no-op.
+	m.HandleKey(" ")
+	if len(m.selected) != 8 {
+		t.Errorf("expected selection to be capped at 8, got %d", len(m.selected))
+	}
+}
+
+func TestHandleKey_BackspaceAtEmptyQueryRemovesLastPill(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey(" ")    // select U1
+	m.HandleKey("down") // highlight U2
+	m.HandleKey(" ")    // select U2
+	// Two pills. Query is empty. Backspace should remove the LAST pill (U2).
+	m.HandleKey("backspace")
+	if _, ok := m.selected["U2"]; ok {
+		t.Error("expected U2 removed by backspace at empty query")
+	}
+	if _, ok := m.selected["U1"]; !ok {
+		t.Error("expected U1 still selected")
 	}
 }
