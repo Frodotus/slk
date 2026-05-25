@@ -515,3 +515,18 @@ func TestBgFgANSIForRGBA(t *testing.T) {
 		t.Errorf("fgANSIFor(RGBA) = %q, want %q", got, "\x1b[38;2;26;26;46m")
 	}
 }
+
+// TestBgFgANSIForBasicColorOutOfRange pins the documented fall-through:
+// BasicColor values ≥16 (constructible since BasicColor is uint8) are
+// out of the valid 0-15 range and must fall through to truecolor rather
+// than producing malformed escapes like "\x1b[116m".
+func TestBgFgANSIForBasicColorOutOfRange(t *testing.T) {
+	bg := bgANSIFor(ansi.BasicColor(16))
+	if !strings.HasPrefix(bg, "\x1b[48;2;") {
+		t.Errorf("out-of-range BasicColor bg should fall through to truecolor, got %q", bg)
+	}
+	fg := fgANSIFor(ansi.BasicColor(16))
+	if !strings.HasPrefix(fg, "\x1b[38;2;") {
+		t.Errorf("out-of-range BasicColor fg should fall through to truecolor, got %q", fg)
+	}
+}
