@@ -160,3 +160,73 @@ func TestResolveEmojiToTokens_UnicodeClusters(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveEmojiToTokens_Mixed(t *testing.T) {
+	thumbURL := CDNBaseURL + "1f44d.png"
+	heartURL := CDNBaseURL + "2764.png"
+	rocketURL := CDNBaseURL + "1f680.png"
+
+	cases := []struct {
+		name string
+		in   string
+		want []Token
+	}{
+		{
+			"shortcode then unicode emoji",
+			":thumbsup: yes \u2764\uFE0F",
+			[]Token{
+				emoji(":thumbsup:", thumbURL),
+				text(" yes "),
+				emoji("\u2764\uFE0F", heartURL),
+			},
+		},
+		{
+			"unicode emoji then shortcode",
+			"\U0001F44D :heart:",
+			[]Token{
+				emoji("\U0001F44D", thumbURL),
+				text(" "),
+				emoji(":heart:", heartURL),
+			},
+		},
+		{
+			"colon inside non-emoji text (URL-like)",
+			"see https://example.com path",
+			[]Token{text("see https://example.com path")},
+		},
+		{
+			"lone colon",
+			"foo : bar",
+			[]Token{text("foo : bar")},
+		},
+		{
+			"empty colon pair",
+			"foo :: bar",
+			[]Token{text("foo :: bar")},
+		},
+		{
+			"non-emoji unicode passes through",
+			"caf\u00e9",
+			[]Token{text("caf\u00e9")},
+		},
+		{
+			"three emoji + text + shortcode at boundaries",
+			"\U0001F44D\u2764\uFE0F\U0001F680 mid :thumbsup:",
+			[]Token{
+				emoji("\U0001F44D", thumbURL),
+				emoji("\u2764\uFE0F", heartURL),
+				emoji("\U0001F680", rocketURL),
+				text(" mid "),
+				emoji(":thumbsup:", thumbURL),
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ResolveEmojiToTokens(c.in, nil)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("ResolveEmojiToTokens(%q):\n got  %#v\n want %#v", c.in, got, c.want)
+			}
+		})
+	}
+}
