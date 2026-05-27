@@ -39,7 +39,7 @@ Create `internal/emoji/testdata/slack_urls.json`:
   "_comment": "Captured/expected Slack CDN URLs for representative emoji, used to validate internal/emoji/url.go. To re-capture: open Slack web with a workspace using the 'google' emoji style, open browser network tab filtered to slack-edge.com, expand a message containing the emoji, and copy the URL of the .png request. VS16 (U+FE0F) is stripped from URL paths; ZWJ (U+200D) and regional-indicator codepoints are kept.",
   "base": "https://a.slack-edge.com/production-standard-emoji-assets/16.0/google-small/",
   "entries": [
-    {"name": "thumbsup",      "codepoints": [127149],                 "url": "https://a.slack-edge.com/production-standard-emoji-assets/16.0/google-small/1f44d.png"},
+    {"name": "thumbsup",      "codepoints": [128077],                 "url": "https://a.slack-edge.com/production-standard-emoji-assets/16.0/google-small/1f44d.png"},
     {"name": "heart",         "codepoints": [10084, 65039],           "url": "https://a.slack-edge.com/production-standard-emoji-assets/16.0/google-small/2764.png"},
     {"name": "warning",       "codepoints": [9888, 65039],            "url": "https://a.slack-edge.com/production-standard-emoji-assets/16.0/google-small/26a0.png"},
     {"name": "joy",           "codepoints": [128514],                 "url": "https://a.slack-edge.com/production-standard-emoji-assets/16.0/google-small/1f602.png"},
