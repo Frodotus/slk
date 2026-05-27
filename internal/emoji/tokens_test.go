@@ -102,3 +102,61 @@ func TestResolveEmojiToTokens_Shortcodes(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveEmojiToTokens_UnicodeClusters(t *testing.T) {
+	thumbURL := CDNBaseURL + "1f44d.png"                  // 👍
+	astronautURL := CDNBaseURL + "1f468-200d-1f680.png"   // 👨‍🚀 (ZWJ kept)
+	heartURL := CDNBaseURL + "2764.png"                   // ❤️ (VS16 stripped)
+	flagUSURL := CDNBaseURL + "1f1fa-1f1f8.png"           // 🇺🇸 (regional indicators)
+	rainbowURL := CDNBaseURL + "1f3f3-200d-1f308.png"     // 🏳️‍🌈
+
+	cases := []struct {
+		name string
+		in   string
+		want []Token
+	}{
+		{
+			"single emoji",
+			"\U0001F44D",
+			[]Token{emoji("\U0001F44D", thumbURL)},
+		},
+		{
+			"emoji with text",
+			"nice \U0001F44D!",
+			[]Token{text("nice "), emoji("\U0001F44D", thumbURL), text("!")},
+		},
+		{
+			"ZWJ sequence stays one token",
+			"\U0001F468\u200D\U0001F680",
+			[]Token{emoji("\U0001F468\u200D\U0001F680", astronautURL)},
+		},
+		{
+			"VS16 sequence",
+			"\u2764\uFE0F",
+			[]Token{emoji("\u2764\uFE0F", heartURL)},
+		},
+		{
+			"regional indicator pair",
+			"\U0001F1FA\U0001F1F8",
+			[]Token{emoji("\U0001F1FA\U0001F1F8", flagUSURL)},
+		},
+		{
+			"rainbow flag (ZWJ + VS16)",
+			"\U0001F3F3\uFE0F\u200D\U0001F308",
+			[]Token{emoji("\U0001F3F3\uFE0F\u200D\U0001F308", rainbowURL)},
+		},
+		{
+			"two emoji adjacent",
+			"\U0001F44D\u2764\uFE0F",
+			[]Token{emoji("\U0001F44D", thumbURL), emoji("\u2764\uFE0F", heartURL)},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ResolveEmojiToTokens(c.in, nil)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("ResolveEmojiToTokens(%q):\n got  %#v\n want %#v", c.in, got, c.want)
+			}
+		})
+	}
+}

@@ -2,7 +2,10 @@ package emoji
 
 import (
 	"strings"
+	"sync"
 	"unicode/utf8"
+
+	"github.com/rivo/uniseg"
 )
 
 // TokenKind discriminates between text and emoji tokens in the
@@ -95,7 +98,26 @@ func ResolveEmojiToTokens(text string, customs map[string]string) []Token {
 				// text run.
 			}
 		}
-		// (b) Emoji-cluster pass — implemented in Task 3.7.
+		// (b) Emoji-cluster pass.
+		if r, _ := utf8.DecodeRuneInString(text[i:]); r >= 0x80 {
+			// Only attempt grapheme segmentation when the byte at i is
+			// the start of a non-ASCII rune. Pure-ASCII fast path
+			// avoids the uniseg.NewGraphemes call cost per byte.
+			cluster, clusterLen, found := nextGraphemeCluster(text[i:])
+			if found && isKnownEmojiCluster(cluster) {
+				url := BuildStandardEmojiURL([]rune(cluster))
+				if url != "" {
+					flushText()
+					tokens = append(tokens, Token{
+						Kind: TokenEmoji,
+						Text: cluster,
+						URL:  url,
+					})
+					i += clusterLen
+					continue
+				}
+			}
+		}
 
 		// Default: consume one rune into the text buffer.
 		r, sz := utf8.DecodeRuneInString(text[i:])
@@ -144,4 +166,77 @@ func isShortcodeChar(c byte) bool {
 		(c >= 'a' && c <= 'z') ||
 		(c >= '0' && c <= '9') ||
 		c == '_' || c == '+' || c == '-'
+}
+
+// emojiClusterSet is the set of all grapheme clusters known to
+// resolve to standard emoji. Populated from the kyokomi codemap
+// values on first lookup. Both the canonical form and a
+// VS16-stripped form are inserted so source text using either
+// presentation triggers a match.
+var (
+	emojiClusterSetOnce sync.Once
+	emojiClusterSet     map[string]struct{}
+)
+
+func initEmojiClusterSet() {
+	set := make(map[string]struct{}, 4096)
+	for _, u := range emojilibCodeMap() {
+		// kyokomi appends a trailing space for Sprint-style use; strip it.
+		canonical := strings.TrimRight(u, " ")
+		if canonical == "" {
+			continue
+		}
+		set[canonical] = struct{}{}
+
+		// Also insert the VS16-stripped form for source text that
+		// uses bare codepoints without the variation selector.
+		stripped := stripVS16(canonical)
+		if stripped != canonical && stripped != "" {
+			set[stripped] = struct{}{}
+		}
+	}
+	emojiClusterSet = set
+}
+
+func isKnownEmojiCluster(cluster string) bool {
+	emojiClusterSetOnce.Do(initEmojiClusterSet)
+	_, ok := emojiClusterSet[cluster]
+	return ok
+}
+
+func stripVS16(s string) string {
+	if !strings.ContainsRune(s, vs16) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == vs16 {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// emojilibCodeMap is a thin indirection so the kyokomi import can be
+// shared with url.go without re-importing the package here.
+func emojilibCodeMap() map[string]string {
+	ensureKyokomiCodeMap()
+	return kyokomiCodeMap
+}
+
+// nextGraphemeCluster returns the first grapheme cluster of s, its
+// byte length, and true if a cluster was extracted. Returns
+// ("", 0, false) on empty input.
+func nextGraphemeCluster(s string) (string, int, bool) {
+	if s == "" {
+		return "", 0, false
+	}
+	gr := uniseg.NewGraphemes(s)
+	if !gr.Next() {
+		return "", 0, false
+	}
+	cluster := gr.Str()
+	return cluster, len(cluster), true
 }

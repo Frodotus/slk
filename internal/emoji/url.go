@@ -3,9 +3,25 @@ package emoji
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	emojilib "github.com/kyokomi/emoji/v2"
 )
+
+// kyokomiCodeMap is a one-time-snapshot of emojilib.CodeMap() for
+// use by url.go and tokens.go without each call paying the cost of
+// emojilib's map-building. Initialized at first use of any URL
+// helper (CodepointsForShortcode triggers it).
+var (
+	kyokomiCodeMapOnce sync.Once
+	kyokomiCodeMap     map[string]string
+)
+
+func ensureKyokomiCodeMap() {
+	kyokomiCodeMapOnce.Do(func() {
+		kyokomiCodeMap = emojilib.CodeMap()
+	})
+}
 
 // CDNBaseURL is the prefix Slack uses for its standard-emoji asset
 // images. The "16.0" version segment changes when Slack ships a new
@@ -57,12 +73,13 @@ func BuildStandardEmojiURL(codepoints []rune) string {
 // VS16 and ZWJ are returned verbatim; URL construction strips VS16
 // at BuildStandardEmojiURL time.
 func CodepointsForShortcode(name string) ([]rune, bool) {
+	ensureKyokomiCodeMap()
 	key := ":" + name + ":"
-	u, ok := emojilib.CodeMap()[key]
+	u, ok := kyokomiCodeMap[key]
 	if !ok {
 		return nil, false
 	}
-	return []rune(u), true
+	return []rune(strings.TrimRight(u, " ")), true
 }
 
 // customEmojiAliasPrefix marks a Slack custom-emoji alias entry
