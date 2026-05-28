@@ -946,6 +946,13 @@ func (m *Model) SetEmojiEntries(entries []emoji.EmojiEntry) {
 	m.dirty()
 }
 
+// SetEmojiContext forwards the emoji-image rendering context to the
+// underlying autocomplete picker. Called from App at startup and
+// whenever the customs map changes.
+func (m *Model) SetEmojiContext(ctx emojipicker.EmojiContext) {
+	m.emojiPicker.SetEmojiContext(ctx)
+}
+
 // IsEmojiActive returns whether the emoji picker is currently showing.
 func (m Model) IsEmojiActive() bool { return m.emojiActive }
 
