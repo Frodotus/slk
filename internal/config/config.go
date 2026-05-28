@@ -286,17 +286,11 @@ func (c Config) SectionOrder(teamID, sectionName string) int {
 	return 0
 }
 
-// matchSectionIn walks sections in Order-ascending order and returns
-// the first section name whose patterns match channelName.
-func matchSectionIn(sections map[string]SectionDef, channelName string) string {
-	name, _ := matchSectionAndOrderIn(sections, channelName)
-	return name
-}
-
-// matchSectionAndOrderIn is the order-aware sibling of matchSectionIn.
-// It also returns the per-channel order encoded in the matching
-// pattern's ":N" suffix (0 if absent). Patterns are stripped of any
-// ":N" suffix before being passed to filepath.Match.
+// matchSectionAndOrderIn walks sections in Order-ascending order and
+// returns the first section name whose patterns match channelName,
+// along with the per-channel order encoded in the matching pattern's
+// ":N" suffix (0 if absent). Patterns are stripped of any ":N" suffix
+// before being passed to filepath.Match.
 func matchSectionAndOrderIn(sections map[string]SectionDef, channelName string) (string, int) {
 	type entry struct {
 		name     string
