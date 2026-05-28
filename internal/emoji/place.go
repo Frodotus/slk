@@ -90,6 +90,21 @@ func Place(ctx PlaceContext, url string, cells int) (string, func(io.Writer) err
 	if url == "" || ctx.Fetcher == nil || cells < 1 {
 		return "", nil, false
 	}
-	// Placeholder; tasks 5.3 / 5.5 fill in warm and cold paths.
+
+	target := goimage.Pt(cells, 1)
+	key := EmojiCacheKey(url)
+
+	// Warm path: a prerendered kitty placement string is ready in the
+	// fetcher's prerender memo. The fetcher's worker populated this
+	// off the UI thread when the fetch completed.
+	if r, ok := ctx.Fetcher.Prerendered(key, target, imgpkg.ProtoKitty); ok {
+		if len(r.Lines) > 0 {
+			return r.Lines[0], r.OnFlush, true
+		}
+	}
+
+	// Cold path — implemented in Task 5.6.
+	// For now, return a placeholder reservation without spawning a
+	// fetch so this task's tests pass in isolation.
 	return strings.Repeat(" ", cells), nil, true
 }

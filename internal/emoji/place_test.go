@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	goimage "image"
+	"io"
 	"sync"
 	"testing"
 
@@ -107,3 +108,52 @@ func TestPlace_InvalidInputs(t *testing.T) {
 		t.Errorf("fetcher was called %d times for invalid inputs, want 0", len(ff.fetchCalls))
 	}
 }
+
+func TestPlace_WarmPath_ReturnsKittyLine(t *testing.T) {
+	ff := newFakeFetcher()
+	url := "https://a.slack-edge.com/...1f44d.png"
+	key := EmojiCacheKey(url)
+	target := goimage.Pt(2, 1)
+
+	// Seed a prerender hit: 2-cell-wide kitty placement string.
+	wantLine := "\U0010EEEE\U0010EEEE" // two kitty placeholder runes (the real renderer emits this with diacritics + SGR fg; for the unit test, any deterministic placement string is fine)
+	flushCalled := 0
+	ff.setPrerendered(key, target, imgpkg.Render{
+		Cells:    target,
+		Lines:    []string{wantLine},
+		Fallback: []string{wantLine},
+		OnFlush: func(_ io.Writer) error {
+			flushCalled++
+			return nil
+		},
+	})
+
+	ctx := PlaceContext{Fetcher: ff}
+	got, flush, ok := Place(ctx, url, 2)
+	if !ok {
+		t.Fatalf("Place: ok=false, want true (warm path)")
+	}
+	if got != wantLine {
+		t.Errorf("Place placement = %q, want %q", got, wantLine)
+	}
+	if flush == nil {
+		t.Fatalf("Place: flush is nil, want a callback for the warm path")
+	}
+	// flush is io.Writer-shaped; call with a discarding writer to
+	// verify it doesn't panic and increments the counter.
+	if err := flush(discardWriter{}); err != nil {
+		t.Errorf("flush returned err = %v, want nil", err)
+	}
+	if flushCalled != 1 {
+		t.Errorf("flush invocation count = %d, want 1", flushCalled)
+	}
+
+	// No fetch goroutine should have been spawned on the warm path.
+	if len(ff.fetchCalls) != 0 {
+		t.Errorf("fetcher.Fetch called %d times on warm path, want 0", len(ff.fetchCalls))
+	}
+}
+
+type discardWriter struct{}
+
+func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
