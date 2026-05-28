@@ -1689,7 +1689,20 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 		contentWidth = 20
 	}
 
-	text := styles.MessageText.Render(messages.WordWrap(messages.RenderSlackMarkdown(messages.MessageTextSource(msg), userNames, channelNames), contentWidth))
+	// flushes aggregates per-frame side effects (kitty image upload
+	// escapes) from body-text emoji, reaction-pill emoji, and inline
+	// image attachments. Walked by the View() loop for visible entries.
+	// Mirrors the messages-pane named-return `flushes` slice.
+	var flushes []func(io.Writer) error
+	bodyOpts := messages.RenderSlackMarkdownOpts{
+		UserNames:    userNames,
+		ChannelNames: channelNames,
+		PlaceCtx:     m.emojiCtx.PlaceCtx,
+		EmojiCells:   m.emojiCtx.Cells,
+		Customs:      m.emojiCtx.Customs,
+		EmojiFlushes: &flushes,
+	}
+	text := styles.MessageText.Render(messages.WordWrap(messages.RenderSlackMarkdownWith(messages.MessageTextSource(msg), bodyOpts), contentWidth))
 
 	var reactionLine string
 	// pillSpecs captures one entry per real (non-"+") reaction pill in
@@ -1795,14 +1808,13 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 	}
 
 	// Attachments: per-attachment inline render via imgrender.Renderer.
-	// v1: flushes are aggregated and returned for the cache layer to
-	// invoke during View(); the per-block Hit and SixelRows are
-	// discarded (click-to-preview from threads and inline sixel
-	// emission are out of scope for v1; sixel images render their
+	// v1: flushes are aggregated into the unified `flushes` slice for
+	// the cache layer to invoke during View(); the per-block Hit and
+	// SixelRows are discarded (click-to-preview from threads and inline
+	// sixel emission are out of scope for v1; sixel images render their
 	// res.Lines placeholder/sentinel only).
 	var attachmentLines string
 	attachmentLineCount := 0
-	var aggFlushes []func(io.Writer) error
 	if len(msg.Attachments) > 0 {
 		if m.imgRenderer == nil {
 			m.imgRenderer = imgrender.NewRenderer()
@@ -1821,7 +1833,7 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 				Thumbs: imgThumbs,
 			}, m.channelID, msg.TS, contentWidth, 0 /* baseRow */, attIdx, 0 /* contentColBase */)
 			blocks = append(blocks, strings.Join(res.Lines, "\n"))
-			aggFlushes = append(aggFlushes, res.Flushes...)
+			flushes = append(flushes, res.Flushes...)
 			attachmentLineCount += len(res.Lines)
 		}
 		attachmentLines = "\n" + strings.Join(blocks, "\n")
@@ -1851,5 +1863,5 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 		}
 	}
 
-	return line + "\n" + text + attachmentLines + reactionLine, aggFlushes, reactionHits
+	return line + "\n" + text + attachmentLines + reactionLine, flushes, reactionHits
 }
