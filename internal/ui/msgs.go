@@ -30,6 +30,19 @@ import (
 // every UI surface that renders emoji.
 type EmojiImageReadyMsg = emojiutil.EmojiImageReadyMsg
 
+// emojiInvalidateMsg is dispatched by the debounce timer scheduled from
+// the EmojiImageReadyMsg reducer arm. When it lands, the App performs a
+// single wholesale cache invalidation across every emoji-rendering
+// surface. All EmojiImageReadyMsg arrivals during the debounce window
+// collapse to this one invalidation — without coalescing a busy channel
+// with N cold-cache emoji would produce N full rebuilds (a few hundred
+// renderMessagePlain calls each) on the UI thread in rapid succession,
+// presenting as a multi-second freeze.
+//
+// Lowercase (unexported) because no other package dispatches this — it
+// is purely an internal debounce signal.
+type emojiInvalidateMsg struct{}
+
 // Messages sent between components
 type (
 	ChannelSelectedMsg struct {

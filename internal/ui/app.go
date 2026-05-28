@@ -185,6 +185,14 @@ type App struct {
 	// would needlessly invalidate any in-flight debounced fetch about to land.
 	pendingThreadFetchGen uint64
 
+	// emojiInvalidatePending guards against scheduling multiple tick
+	// callbacks when many EmojiImageReadyMsg arrive in rapid succession
+	// (e.g., a fresh channel with 50+ cold-cache emoji whose fetches all
+	// complete in a burst). Coalesces every arrival within the debounce
+	// window into a single cache invalidation when the emojiInvalidateMsg
+	// tick fires. See reducer_io.go's EmojiImageReadyMsg arm.
+	emojiInvalidatePending bool
+
 	// Reaction picker
 	reactionPicker *reactionpicker.Model
 	confirmPrompt  *confirmprompt.Model
