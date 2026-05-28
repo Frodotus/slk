@@ -1405,15 +1405,20 @@ func (a *App) SetImageContext(ctx imgrender.ImageContext) {
 	a.threadPanel.SetImageContext(ctx)
 }
 
-// SetEmojiContext forwards the emoji rendering context to the
-// messages pane. Subsequent CustomEmojisLoadedMsg dispatches update
-// the customs map via App.SetCustomEmoji which calls back into the
-// messages pane's emojiCtx.
+// SetEmojiContext forwards the emoji rendering context to both the
+// messages pane and the thread pane. They each hold their own copy
+// because they have independent render caches and call paths.
+// Subsequent CustomEmojisLoadedMsg dispatches update the customs map
+// via App.SetCustomEmoji which calls back into both panes' emojiCtx.
 //
-// Phase 7 extends this to the thread panel; Phase 8 to the picker;
-// Phase 9 to autocomplete.
+// Phase 8 extends this to the picker; Phase 9 to autocomplete.
 func (a *App) SetEmojiContext(ctx messages.EmojiContext) {
 	a.messagepane.SetEmojiContext(ctx)
+	a.threadPanel.SetEmojiContext(thread.EmojiContext{
+		PlaceCtx: ctx.PlaceCtx,
+		Cells:    ctx.Cells,
+		Customs:  ctx.Customs,
+	})
 }
 
 // SetImageFetcher records the image fetcher so the preview overlay can
@@ -1723,9 +1728,10 @@ func (a *App) SetCustomEmoji(customs map[string]string) {
 	if a.reactionPicker != nil {
 		a.reactionPicker.SetCustomEmoji(customs)
 	}
-	// Update the messages pane's emoji-image context so newly-known
-	// custom emoji URLs become resolvable on the next render.
+	// Update both panes' emoji-image context so newly-known custom
+	// emoji URLs become resolvable on the next render.
 	a.messagepane.SetEmojiCustoms(customs)
+	a.threadPanel.SetEmojiCustoms(customs)
 }
 
 // SetInitialChannel sets the active channel and its messages before the TUI starts.
