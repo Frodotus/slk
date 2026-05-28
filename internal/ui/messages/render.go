@@ -677,16 +677,6 @@ func RenderSlackMarkdownWith(text string, opts RenderSlackMarkdownOpts) string {
 	return output
 }
 
-// renderInlineFormatting is the legacy 3-arg wrapper. Used only by
-// tests that pre-date the opts struct; production code (called via
-// RenderSlackMarkdownWith) goes through renderInlineFormattingWith.
-func renderInlineFormatting(text string, userNames map[string]string, channelNames map[string]string) string {
-	return renderInlineFormattingWith(text, RenderSlackMarkdownOpts{
-		UserNames:    userNames,
-		ChannelNames: channelNames,
-	})
-}
-
 func renderInlineFormattingWith(text string, opts RenderSlackMarkdownOpts) string {
 	userNames := opts.UserNames
 	channelNames := opts.ChannelNames
