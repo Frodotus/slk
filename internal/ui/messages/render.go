@@ -607,18 +607,75 @@ func renderInlineFormattingWith(text string, opts RenderSlackMarkdownOpts) strin
 		return mentionStyle().Render("@" + name)
 	})
 
-	// Emoji shortcodes: :red_circle: -> 🔴, but only when the resolved
-	// Unicode form is composition-safe (single codepoint or VS16-
-	// anchored). ZWJ sequences, flag pairs, and skin-tone modifiers
-	// stay as readable :shortcode: text — they break terminal width
-	// arithmetic on many fonts. See internal/emoji/shouldrender.go.
+	// Emoji resolution.
 	//
-	// StripSkinToneFromText runs first because skin-toned shortcodes
-	// (e.g. :wave_tone3:) should resolve as their base name (:wave:)
-	// rather than be left as literal text.
-	text = emojiutil.ResolveShortcodesInText(emojiutil.StripSkinToneFromText(text))
+	// Image path (kitty + emoji_images=on): tokenize the text and
+	// render emoji as kitty image placements via emoji.Place. The
+	// width math (set up by Phase 4) already reports the configured
+	// cell footprint for every image-renderable cluster, so layout
+	// is deterministic regardless of font.
+	//
+	// Legacy path: the glyph/shortcode-text substitution that
+	// retained ":name:" for multi-codepoint sequences. See
+	// internal/emoji/shouldrender.go. StripSkinToneFromText runs
+	// first because skin-toned shortcodes (e.g. :wave_tone3:)
+	// should resolve as their base name (:wave:) rather than be
+	// left as literal text.
+	if emojiutil.ImageModeActive() && opts.PlaceCtx.Fetcher != nil {
+		stripped := emojiutil.StripSkinToneFromText(text)
+		tokens := emojiutil.ResolveEmojiToTokens(stripped, opts.Customs)
+		text = renderEmojiTokensInline(tokens, opts.PlaceCtx, opts.EmojiCells, opts.EmojiFlushes)
+	} else {
+		text = emojiutil.ResolveShortcodesInText(emojiutil.StripSkinToneFromText(text))
+	}
 
 	return text
+}
+
+// renderEmojiTokensInline walks a Token stream and returns the
+// rendered inline string. Emoji tokens are placed via emoji.Place
+// when the image path is active (emoji.ImageModeActive() AND
+// placeCtx.Fetcher != nil); otherwise they render as their plain-text
+// representation (the source-form text already captured on the
+// Token).
+//
+// Kitty image upload callbacks collected on the warm path are
+// appended to *flushes when non-nil. flushes left nil disables
+// collection (caller doesn't care; cold-path callers).
+func renderEmojiTokensInline(
+	tokens []emojiutil.Token,
+	placeCtx emojiutil.PlaceContext,
+	cells int,
+	flushes *[]func(io.Writer) error,
+) string {
+	if cells <= 0 {
+		cells = 2
+	}
+	imageOK := emojiutil.ImageModeActive() && placeCtx.Fetcher != nil
+
+	var b strings.Builder
+	for _, tok := range tokens {
+		switch tok.Kind {
+		case emojiutil.TokenText:
+			b.WriteString(tok.Text)
+		case emojiutil.TokenEmoji:
+			if imageOK && tok.URL != "" {
+				placement, flush, ok := emojiutil.Place(placeCtx, tok.URL, cells)
+				if ok {
+					b.WriteString(placement)
+					if flush != nil && flushes != nil {
+						*flushes = append(*flushes, flush)
+					}
+					continue
+				}
+			}
+			// Fallback: plain-text form (":name:" for unresolved
+			// shortcodes / image-mode off, or the source-form glyph
+			// for raw-codepoint emoji that bypassed Place).
+			b.WriteString(tok.Text)
+		}
+	}
+	return b.String()
 }
 
 // renderItalics wraps `_X_` runs in italicStyle when the surrounding
