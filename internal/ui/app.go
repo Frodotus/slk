@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -21,6 +22,7 @@ import (
 	"github.com/gammons/slk/internal/config"
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/emoji"
+	"github.com/gammons/slk/internal/export"
 	"github.com/gammons/slk/internal/ids"
 	imgpkg "github.com/gammons/slk/internal/image"
 	"github.com/gammons/slk/internal/ui/channelfinder"
@@ -767,6 +769,63 @@ func (a *App) copyPermalinkOfSelected() tea.Cmd {
 			func() tea.Msg { return statusbar.PermalinkCopiedMsg{} },
 		}
 	}
+}
+
+func (a *App) saveThreadToFile() tea.Cmd {
+	if a.focusedPanel != PanelThread {
+		return func() tea.Msg { return ToastMsg{Text: "Open a thread first"} }
+	}
+	if a.threadPanel.IsEmpty() {
+		return nil
+	}
+	parent := a.threadPanel.ParentMsg()
+	replies := a.threadPanel.Replies()
+	userNames := a.threadPanel.UserNames()
+	channelNames := a.threadPanel.ChannelNames()
+
+	channelName := "thread"
+	if channelNames != nil {
+		if name, ok := channelNames[a.threadPanel.ChannelID()]; ok {
+			channelName = name
+		}
+	}
+
+	return func() tea.Msg {
+		content := export.ThreadToMarkdown(parent, replies, userNames, channelNames)
+
+		dir, err := export.ExportDir()
+		if err != nil {
+			return statusbar.ThreadSaveFailedMsg{Reason: err.Error()}
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return statusbar.ThreadSaveFailedMsg{Reason: err.Error()}
+		}
+		filename := fmt.Sprintf("slk-thread-%s-%s.md", sanitizeForFilename(channelName), time.Now().Format("2006-01-02-150405"))
+		path := filepath.Join(dir, filename)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return statusbar.ThreadSaveFailedMsg{Reason: err.Error()}
+		}
+		return statusbar.ThreadSavedMsg{Path: path}
+	}
+}
+
+func sanitizeForFilename(s string) string {
+	var b strings.Builder
+	prev := false
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			b.WriteRune(r)
+			prev = false
+		} else if !prev {
+			b.WriteByte('-')
+			prev = true
+		}
+	}
+	result := strings.Trim(b.String(), "-")
+	if result == "" {
+		return "unknown"
+	}
+	return result
 }
 
 func (a *App) handleDown() tea.Cmd {
