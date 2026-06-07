@@ -1,8 +1,11 @@
 package styles
 
 import (
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -283,5 +286,77 @@ func TestANSIThemesSelectionTintPaletteInherited(t *testing.T) {
 				t.Errorf("%s unfocused selection tint = %T, want ansi.BasicColor (palette-inherited)", tc.theme, unfocused)
 			}
 		})
+	}
+}
+
+// --- channels-panel contrast guard ---
+
+// contrastAllowlist are themes intentionally exempt from the
+// channels-panel contrast requirement: the ANSI themes use palette
+// numbers (not hex) and inherit the terminal, and "hot dog stand" is a
+// deliberately garish novelty whose red-on-yellow split we don't want
+// constraining the threshold.
+var contrastAllowlist = map[string]bool{
+	"ansi dark":     true,
+	"ansi light":    true,
+	"hot dog stand": true,
+}
+
+// minChannelsPanelDeltaLstar is the minimum perceptual lightness
+// difference (CIELAB L*) between a theme's message-pane Background and
+// its channels-panel SidebarBackground. 6.0 is calibrated so the
+// slack-default split (ΔL*≈72) passes easily while a 1–2% nudge
+// (ΔL*≈3) fails. See spec 2026-06-07-more-themes-design.md.
+const minChannelsPanelDeltaLstar = 6.0
+
+func srgbToLinear(c float64) float64 {
+	if c <= 0.04045 {
+		return c / 12.92
+	}
+	return math.Pow((c+0.055)/1.055, 2.4)
+}
+
+// lstar returns the CIELAB L* (0..100) of a "#RRGGBB" hex string.
+func lstar(hex string) float64 {
+	h := strings.TrimPrefix(hex, "#")
+	if len(h) != 6 {
+		return 0
+	}
+	ri, _ := strconv.ParseInt(h[0:2], 16, 0)
+	gi, _ := strconv.ParseInt(h[2:4], 16, 0)
+	bi, _ := strconv.ParseInt(h[4:6], 16, 0)
+	r := srgbToLinear(float64(ri) / 255)
+	g := srgbToLinear(float64(gi) / 255)
+	b := srgbToLinear(float64(bi) / 255)
+	y := 0.2126*r + 0.7152*g + 0.0722*b
+	if y > 0.008856 {
+		return 116*math.Cbrt(y) - 16
+	}
+	return 903.3 * y
+}
+
+// TestChannelsPanelContrast asserts every non-allowlisted built-in
+// theme gives the channels panel a perceptibly distinct surface from
+// the message pane. Reports each theme's measured ΔL* on failure so the
+// retune is a deterministic adjust-and-rerun loop.
+func TestChannelsPanelContrast(t *testing.T) {
+	for key, theme := range builtinThemes {
+		if contrastAllowlist[key] {
+			continue
+		}
+		bg := theme.Colors.Background
+		sb := theme.Colors.SidebarBackground
+		if sb == "" {
+			sb = bg // falls back to Background -> zero contrast
+		}
+		if !strings.HasPrefix(bg, "#") || !strings.HasPrefix(sb, "#") {
+			t.Errorf("theme %q: non-hex background/sidebar not allowlisted (bg=%q sidebar=%q)", key, bg, sb)
+			continue
+		}
+		delta := math.Abs(lstar(bg) - lstar(sb))
+		if delta < minChannelsPanelDeltaLstar {
+			t.Errorf("theme %q channels-panel contrast too low: ΔL*=%.1f (bg=%s L*=%.1f, sidebar=%s L*=%.1f), want >= %.1f",
+				key, delta, bg, lstar(bg), sb, lstar(sb), minChannelsPanelDeltaLstar)
+		}
 	}
 }
