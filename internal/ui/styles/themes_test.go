@@ -293,9 +293,11 @@ func TestANSIThemesSelectionTintPaletteInherited(t *testing.T) {
 
 // contrastAllowlist are themes intentionally exempt from the
 // channels-panel contrast requirement: the ANSI themes use palette
-// numbers (not hex) and inherit the terminal, and "hot dog stand" is a
-// deliberately garish novelty whose red-on-yellow split we don't want
-// constraining the threshold.
+// numbers (not hex), so a CIELAB hex computation doesn't apply to them
+// (they inherit the terminal palette). "hot dog stand" is a deliberately
+// garish novelty whose hand-picked red-on-yellow palette we never want
+// the contrast retune to touch; it already clears the threshold on its
+// own, so the exemption is belt-and-suspenders.
 var contrastAllowlist = map[string]bool{
 	"ansi dark":     true,
 	"ansi light":    true,

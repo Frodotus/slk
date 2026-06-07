@@ -167,7 +167,7 @@ var builtinThemes = map[string]struct {
 		Primary: "#7FB4CA", Accent: "#98BB6C", Warning: "#E6C384", Error: "#E46876",
 		Background: "#1F1F28", Surface: "#2A2A37", SurfaceDark: "#16161D",
 		Text: "#DCD7BA", TextMuted: "#727169", Border: "#363646",
-		SidebarBackground: "#131319", RailBackground: "#0B0B0F",
+		SidebarBackground: "#0C0C10", RailBackground: "#060608",
 	}},
 	"material ocean": {"Material Ocean", ThemeColors{
 		Primary: "#82AAFF", Accent: "#C3E88D", Warning: "#FFCB6B", Error: "#FF5370",
