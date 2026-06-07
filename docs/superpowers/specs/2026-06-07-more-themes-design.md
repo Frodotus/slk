@@ -40,23 +40,34 @@ prior theme change, trivially testable.
 
 ### The contrast rule
 
-Every theme (new and retuned), except the allowlisted exceptions, must
-satisfy:
+Every theme (new and retuned), except the allowlisted exceptions, must give
+the channels panel a **perceptibly distinct surface** from the message pane:
 
-- **Dark themes:** `SidebarBackground` is a clearly darker and/or more
-  saturated shade than `Background` — a deliberate step, not a 1–2% nudge.
-  `RailBackground` is darker still (sidebar > rail in darkness).
+- **Mid / light themes:** `SidebarBackground` is a clearly darker (and often
+  more saturated) shade than `Background` — a deliberate step, not a 1–2%
+  nudge. `RailBackground` darker still.
+- **Near-black themes** (e.g. Vesper, GitHub Dark): a uniformly darker
+  sidebar is impossible, so the sidebar may instead be a slightly *raised*
+  (lighter) surface. Direction is per-theme aesthetics; what matters is a
+  perceptible step.
 - **Light themes:** keep the existing convention — a dark sidebar against the
   light pane (already enforced by `TestLightThemesHaveDarkSidebars`).
 
-Encoded as a **relative-luminance delta test**: for every hex-based theme,
-`|luminance(Background) − luminance(SidebarBackground)|` must exceed a
-threshold. Luminance uses the standard sRGB relative-luminance formula
-(`0.2126 R + 0.7152 G + 0.0722 B` on linearized channels). The threshold is
-chosen empirically so the current `slack default` split passes comfortably
-and a 1–2% nudge fails; we will pick the concrete value during
-implementation by measuring the retuned palettes (target: a value in the
-~0.04–0.08 linear-luminance range).
+Encoded as a **CIELAB lightness (L\*) difference test**: for every hex-based
+theme, `|Lstar(Background) − Lstar(SidebarBackground)|` must meet or exceed a
+threshold. We use CIELAB L\* (derived from sRGB relative luminance via the
+standard linearization + the L\* transfer function) because it is
+*perceptually uniform* — a single threshold behaves consistently across light
+and dark themes, unlike raw relative luminance whose absolute deltas collapse
+toward zero on dark palettes. The difference is **absolute** so near-black
+themes may raise rather than darken the sidebar.
+
+Starting threshold: **`ΔL* ≥ 6.0`** (calibrated so `slack default`'s split,
+`ΔL* ≈ 72`, passes easily while the current `dark` theme's `ΔL* ≈ 3.2` nudge
+fails). The contrast test reports each theme's measured `ΔL*` on failure so
+the retune is a deterministic adjust-and-rerun loop. The exact threshold may
+be nudged within ~5–7 during implementation if a hand-tuned palette that
+looks clearly distinct lands just under the line.
 
 **Allowlist (excluded from the test):** `ansi dark`, `ansi light` (ANSI
 palette numbers, not hex — `SidebarBackground` falls back to `Background`),
@@ -93,8 +104,8 @@ comply. Untouched: `hot dog stand`, `ansi dark`, `ansi light`.
 - `internal/ui/styles/themes.go` — new map entries; edited sidebar/rail
   values on existing dark themes.
 - `internal/ui/styles/themes_test.go` — new registration + required-color
-  tests for the new themes; the luminance-delta contrast test (with
-  allowlist); a small luminance helper (test-local).
+  tests for the new themes; the CIELAB ΔL* contrast test (with allowlist);
+  a small `lstar(hex)` helper (test-local).
 - `README.md` — theme count (3 occurrences: lines ~4, ~17, ~30).
 - `wiki/Features.md` — theme count (line ~95).
 - `wiki/Configuration.md` — optional short note that themes ship with a
@@ -108,8 +119,9 @@ comply. Untouched: `hot dog stand`, `ansi dark`, `ansi light`.
 - `TestMoreLightThemesHaveDarkSidebars` — new light themes set
   `SidebarBackground` + `RailBackground`.
 - `TestChannelsPanelContrast` — for every hex theme not in the allowlist,
-  the Background↔SidebarBackground luminance delta exceeds the threshold.
-  This is the guard that forces the retune and prevents regressions.
+  `|Lstar(Background) − Lstar(SidebarBackground)| ≥ 6.0`. Reports each
+  theme's measured ΔL* on failure. This is the guard that forces the retune
+  and prevents regressions.
 - Full `go test ./...` and `golangci-lint run` green before completion.
 
 ## Verification of "looks good"
