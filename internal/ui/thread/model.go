@@ -804,6 +804,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 				for j, r := range reply.Reactions {
 					if r.Emoji == emojiName {
 						r.Count--
+						r.UserIDs = messages.RemoveUserID(r.UserIDs, userID)
 						if r.Count <= 0 {
 							m.replies[i].Reactions = append(reply.Reactions[:j], reply.Reactions[j+1:]...)
 						} else {
@@ -819,6 +820,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 					if r.Emoji == emojiName {
 						r.Count++
 						r.HasReacted = true
+						r.UserIDs = messages.AppendUserID(r.UserIDs, userID)
 						m.replies[i].Reactions[j] = r
 						found = true
 						break
@@ -829,6 +831,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 						Emoji:      emojiName,
 						Count:      1,
 						HasReacted: true,
+						UserIDs:    messages.AppendUserID(nil, userID),
 					})
 				}
 			}

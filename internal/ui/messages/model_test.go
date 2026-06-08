@@ -1367,3 +1367,66 @@ func TestModel_RenderMessageWithImageEmoji_FlushesThreaded(t *testing.T) {
 		t.Errorf("flush callback present but OnFlush sentinel never fired; the slice may hold the wrong callback")
 	}
 }
+
+func TestUpdateReactionMaintainsUserIDs(t *testing.T) {
+	// messages.New(msgs, channelName) returns a value Model; m is addressable
+	// so the pointer-receiver methods below work.
+	m := New([]MessageItem{{TS: "100.0", Text: "hi"}}, "general")
+
+	// Add a reaction by user U1 -> creates the group with U1.
+	m.UpdateReaction("100.0", "thumbsup", "U1", false)
+	msg, _ := m.SelectedMessage()
+	if len(msg.Reactions) != 1 {
+		t.Fatalf("want 1 reaction, got %d", len(msg.Reactions))
+	}
+	if got := msg.Reactions[0].UserIDs; len(got) != 1 || got[0] != "U1" {
+		t.Fatalf("want UserIDs [U1], got %v", got)
+	}
+
+	// Add same emoji by U2 -> appends to the same group.
+	m.UpdateReaction("100.0", "thumbsup", "U2", false)
+	msg, _ = m.SelectedMessage()
+	if got := msg.Reactions[0].UserIDs; len(got) != 2 || got[1] != "U2" {
+		t.Fatalf("want UserIDs [U1 U2], got %v", got)
+	}
+
+	// Remove U1 -> group remains with U2.
+	m.UpdateReaction("100.0", "thumbsup", "U1", true)
+	msg, _ = m.SelectedMessage()
+	if got := msg.Reactions[0].UserIDs; len(got) != 1 || got[0] != "U2" {
+		t.Fatalf("want UserIDs [U2] after remove, got %v", got)
+	}
+
+	// Remove U2 -> group disappears (count hits 0).
+	m.UpdateReaction("100.0", "thumbsup", "U2", true)
+	msg, _ = m.SelectedMessage()
+	if len(msg.Reactions) != 0 {
+		t.Fatalf("want 0 reactions after all removed, got %d", len(msg.Reactions))
+	}
+}
+
+// TestAppendRemoveUserIDDoNotMutateInput proves the helpers are pure: the
+// UserIDs slices are aliased across the message pane and thread panel, so the
+// helpers must never write into the input's backing array.
+func TestAppendRemoveUserIDDoNotMutateInput(t *testing.T) {
+	orig := []string{"U1", "U2", "U3"}
+	shared := orig[:3:3] // same backing array, capped
+
+	got := RemoveUserID(shared, "U1")
+	if len(got) != 2 || got[0] != "U2" || got[1] != "U3" {
+		t.Fatalf("RemoveUserID result wrong: %v", got)
+	}
+	if orig[0] != "U1" || orig[1] != "U2" || orig[2] != "U3" {
+		t.Fatalf("RemoveUserID mutated input backing array: %v", orig)
+	}
+
+	base := []string{"U1"}
+	base2 := base[:1:1] // force append to allocate
+	got2 := AppendUserID(base2, "U2")
+	if len(got2) != 2 || got2[0] != "U1" || got2[1] != "U2" {
+		t.Fatalf("AppendUserID result wrong: %v", got2)
+	}
+	if len(base) != 1 || base[0] != "U1" {
+		t.Fatalf("AppendUserID mutated input: %v", base)
+	}
+}

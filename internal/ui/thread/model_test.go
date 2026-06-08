@@ -850,3 +850,47 @@ func (f *fakePlaceFetcher) Fetch(ctx context.Context, req imgpkg.FetchRequest) (
 // Compile-time guard that `io` (used by the fake's Render flush type)
 // is referenced; renderer flushes are `func(io.Writer) error`.
 var _ = io.Discard
+
+func TestThreadUpdateReactionMaintainsUserIDs(t *testing.T) {
+	m := New()
+	// SetThread(parent, replies, channelID, threadTS); the cursor defaults to
+	// the last reply, so the single reply below becomes the selected one.
+	m.SetThread(
+		messages.MessageItem{TS: "199.0", Text: "parent"},
+		[]messages.MessageItem{{TS: "200.0", Text: "reply"}},
+		"C1", "199.0",
+	)
+
+	m.UpdateReaction("200.0", "eyes", "U1", false)
+	reply := m.SelectedReply()
+	if reply == nil || len(reply.Reactions) != 1 {
+		t.Fatalf("want 1 reaction on selected reply")
+	}
+	if got := reply.Reactions[0].UserIDs; len(got) != 1 || got[0] != "U1" {
+		t.Fatalf("want UserIDs [U1], got %v", got)
+	}
+
+	// Add a second user to the same emoji -> appends to the group.
+	m.UpdateReaction("200.0", "eyes", "U2", false)
+	reply = m.SelectedReply()
+	if got := reply.Reactions[0].UserIDs; len(got) != 2 || got[1] != "U2" {
+		t.Fatalf("want UserIDs [U1 U2], got %v", got)
+	}
+
+	// Remove one of many -> group remains with U2.
+	m.UpdateReaction("200.0", "eyes", "U1", true)
+	reply = m.SelectedReply()
+	if reply == nil || len(reply.Reactions) != 1 {
+		t.Fatalf("want 1 reaction remaining after removing one of two")
+	}
+	if got := reply.Reactions[0].UserIDs; len(got) != 1 || got[0] != "U2" {
+		t.Fatalf("want UserIDs [U2] after removing U1, got %v", got)
+	}
+
+	// Remove the last user -> group disappears.
+	m.UpdateReaction("200.0", "eyes", "U2", true)
+	reply = m.SelectedReply()
+	if reply != nil && len(reply.Reactions) != 0 {
+		t.Fatalf("want 0 reactions after remove, got %d", len(reply.Reactions))
+	}
+}

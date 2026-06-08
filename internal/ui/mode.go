@@ -17,6 +17,7 @@ const (
 	ModeConfirm
 	ModeHelp
 	ModeNewMessage
+	ModeReactionsView
 )
 
 // IsModalOverlay reports whether the mode is a full-screen modal
@@ -37,7 +38,8 @@ func (m Mode) IsModalOverlay() bool {
 		ModePresenceCustomSnooze,
 		ModeConfirm,
 		ModeHelp,
-		ModeNewMessage:
+		ModeNewMessage,
+		ModeReactionsView:
 		return true
 	default:
 		return false
@@ -72,6 +74,8 @@ func (m Mode) String() string {
 		return "HELP"
 	case ModeNewMessage:
 		return "NEW MSG"
+	case ModeReactionsView:
+		return "REACTIONS"
 	default:
 		return "UNKNOWN"
 	}
