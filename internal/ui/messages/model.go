@@ -77,9 +77,10 @@ type ThumbSpec struct {
 type AvatarFunc func(userID string) string
 
 type ReactionItem struct {
-	Emoji      string // emoji name without colons, e.g. "thumbsup"
+	Emoji      string   // emoji name without colons, e.g. "thumbsup"
 	Count      int
-	HasReacted bool // whether the current user has reacted with this emoji
+	HasReacted bool     // whether the current user has reacted with this emoji
+	UserIDs    []string // user IDs who reacted with this emoji (cache-sourced)
 }
 
 // viewEntry is a pre-rendered row in the message list (message or date separator).
@@ -1131,6 +1132,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 				for j, r := range msg.Reactions {
 					if r.Emoji == emojiName {
 						r.Count--
+						r.UserIDs = removeUserID(r.UserIDs, userID)
 						if r.Count <= 0 {
 							m.messages[i].Reactions = append(msg.Reactions[:j], msg.Reactions[j+1:]...)
 						} else {
@@ -1146,6 +1148,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 					if r.Emoji == emojiName {
 						r.Count++
 						r.HasReacted = true
+						r.UserIDs = appendUserID(r.UserIDs, userID)
 						m.messages[i].Reactions[j] = r
 						found = true
 						break
@@ -1156,6 +1159,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 						Emoji:      emojiName,
 						Count:      1,
 						HasReacted: true,
+						UserIDs:    appendUserID(nil, userID),
 					})
 				}
 			}
@@ -3326,4 +3330,32 @@ func summarizeMessageItems(items []MessageItem) string {
 	}
 	return fmt.Sprintf("count=%d oldest=%s newest=%s",
 		len(items), items[0].TS, items[len(items)-1].TS)
+}
+
+// appendUserID returns ids with userID appended, skipping empty IDs and
+// de-duplicating so repeated reaction events don't double-count a user.
+func appendUserID(ids []string, userID string) []string {
+	if userID == "" {
+		return ids
+	}
+	for _, id := range ids {
+		if id == userID {
+			return ids
+		}
+	}
+	return append(ids, userID)
+}
+
+// removeUserID returns ids without userID (all occurrences).
+func removeUserID(ids []string, userID string) []string {
+	if userID == "" || len(ids) == 0 {
+		return ids
+	}
+	out := ids[:0]
+	for _, id := range ids {
+		if id != userID {
+			out = append(out, id)
+		}
+	}
+	return out
 }

@@ -1367,3 +1367,40 @@ func TestModel_RenderMessageWithImageEmoji_FlushesThreaded(t *testing.T) {
 		t.Errorf("flush callback present but OnFlush sentinel never fired; the slice may hold the wrong callback")
 	}
 }
+
+func TestUpdateReactionMaintainsUserIDs(t *testing.T) {
+	// messages.New(msgs, channelName) returns a value Model; m is addressable
+	// so the pointer-receiver methods below work.
+	m := New([]MessageItem{{TS: "100.0", Text: "hi"}}, "general")
+
+	// Add a reaction by user U1 -> creates the group with U1.
+	m.UpdateReaction("100.0", "thumbsup", "U1", false)
+	msg, _ := m.SelectedMessage()
+	if len(msg.Reactions) != 1 {
+		t.Fatalf("want 1 reaction, got %d", len(msg.Reactions))
+	}
+	if got := msg.Reactions[0].UserIDs; len(got) != 1 || got[0] != "U1" {
+		t.Fatalf("want UserIDs [U1], got %v", got)
+	}
+
+	// Add same emoji by U2 -> appends to the same group.
+	m.UpdateReaction("100.0", "thumbsup", "U2", false)
+	msg, _ = m.SelectedMessage()
+	if got := msg.Reactions[0].UserIDs; len(got) != 2 || got[1] != "U2" {
+		t.Fatalf("want UserIDs [U1 U2], got %v", got)
+	}
+
+	// Remove U1 -> group remains with U2.
+	m.UpdateReaction("100.0", "thumbsup", "U1", true)
+	msg, _ = m.SelectedMessage()
+	if got := msg.Reactions[0].UserIDs; len(got) != 1 || got[0] != "U2" {
+		t.Fatalf("want UserIDs [U2] after remove, got %v", got)
+	}
+
+	// Remove U2 -> group disappears (count hits 0).
+	m.UpdateReaction("100.0", "thumbsup", "U2", true)
+	msg, _ = m.SelectedMessage()
+	if len(msg.Reactions) != 0 {
+		t.Fatalf("want 0 reactions after all removed, got %d", len(msg.Reactions))
+	}
+}
