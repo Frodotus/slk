@@ -174,6 +174,27 @@ Everything lives in the [**wiki**](https://github.com/gammons/slk/wiki):
 - [Tradeoffs and Non-Goals](https://github.com/gammons/slk/wiki/Tradeoffs-and-Non-Goals) — roadmap, caveats, TOS notice
 - [Architecture](https://github.com/gammons/slk/wiki/Architecture) — service layout, data layer
 
+## Contributing
+
+Contributions are welcome. A few ground rules:
+
+- **AI-assisted PRs are accepted** — and in fact encouraged — but only if
+  they're driven by a **frontier model** (e.g. Claude Opus, GPT-5,
+  Gemini Pro) running with **high thinking effort**. Low-effort,
+  small-model output that nobody reviewed tends to create more work than
+  it saves, and will be closed.
+- Ideally, drive the work with the
+  [superpowers](https://github.com/obra/superpowers) framework (or an
+  equivalent skills/TDD-disciplined workflow). Brainstorm the design
+  first, write tests, then implement.
+- **For large feature additions, open an issue first.** Before sinking
+  time into a big change, file an issue to discuss the idea and approach
+  so we can agree on direction. Bug fixes and small improvements can go
+  straight to a PR.
+- Whether human- or AI-written, **you are responsible for your PR.**
+  Understand the diff, make sure it builds and passes `go vet ./...` and
+  `go test ./...`, and be ready to explain your choices in review.
+
 ## Disclaimer
 
 `slk` is an independent, unofficial project. It is not affiliated with, endorsed by, or sponsored by Slack Technologies, LLC or Salesforce, Inc. "Slack" is a trademark of Slack Technologies, LLC; it is used here only to describe the service this client interoperates with.
