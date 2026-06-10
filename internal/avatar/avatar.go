@@ -207,6 +207,22 @@ func (c *Cache) Get(userID string) string {
 	return c.renders[userID]
 }
 
+// Invalidate drops the cached render for userID and clears the dedup
+// gate and the underlying fetcher entry, so the next Preload re-downloads
+// and re-renders the avatar. Used by the identity-TTL refresh when a
+// user's avatar URL may have changed (Preload alone would short-circuit
+// on the never-cleared inflight gate, and the fetcher would serve the
+// stale image for the stable "avatar-<id>" key).
+func (c *Cache) Invalidate(userID string) {
+	c.inflight.Delete(userID)
+	c.mu.Lock()
+	delete(c.renders, userID)
+	c.mu.Unlock()
+	if c.fetcher != nil {
+		c.fetcher.Delete("avatar-" + userID)
+	}
+}
+
 // renderAvatar produces the avatar's rendered string for the active
 // protocol. Kitty path: SetSource + RenderKey, immediately drain the
 // upload escape to the kitty side channel (the registry's fresh-flag

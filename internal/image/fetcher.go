@@ -153,6 +153,16 @@ func NewFetcher(cache *Cache, client *http.Client) *Fetcher {
 // fallback auths are tried for foreign-team URLs (Slack Connect).
 // Safe to call once at startup; not safe to mutate the input slice
 // afterward.
+// Delete evicts a cached entry by key, forcing the next Fetch for that
+// key to re-download from its URL. Used by avatar refresh when an
+// identity's avatar URL has changed (the cache is keyed by a stable
+// id like "avatar-U123", so a new URL alone wouldn't re-fetch).
+func (f *Fetcher) Delete(key string) {
+	if f.cache != nil {
+		f.cache.Delete(key)
+	}
+}
+
 func (f *Fetcher) SetAuths(auths []TeamAuth) {
 	byTeam := make(map[string]TeamAuth, len(auths))
 	fallbacks := make([]TeamAuth, 0, len(auths))

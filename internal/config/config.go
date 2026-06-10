@@ -124,6 +124,11 @@ type CacheConfig struct {
 	MaxDBSizeMB          int `toml:"max_db_size_mb"`
 	// MaxImageCacheMB caps the on-disk/in-memory image cache size in MB.
 	MaxImageCacheMB int64 `toml:"max_image_cache_mb"`
+	// IdentityTTLDays controls how long a resolved user/bot identity
+	// (display name + avatar) is trusted before it is re-fetched on next
+	// sight. Catches renames and new avatars. 0 disables refresh (cached
+	// forever, the historical behavior).
+	IdentityTTLDays int `toml:"identity_ttl_days"`
 }
 
 // Sidebar holds preferences governing what appears in the channel
@@ -200,6 +205,7 @@ func Default() Config {
 			MessageRetentionDays: 30,
 			MaxDBSizeMB:          500,
 			MaxImageCacheMB:      200,
+			IdentityTTLDays:      7,
 		},
 		Sidebar: Sidebar{
 			HideInactiveAfterDays: 30,
