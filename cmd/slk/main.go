@@ -784,6 +784,14 @@ func run() error {
 		return ""
 	})
 
+	// External commands: register the configured commands and the image
+	// resolver that maps a message to on-disk paths of its already-cached
+	// images (best-effort, non-blocking).
+	app.SetExternalCommands(cfg.ExternalCommands)
+	app.SetExtCmdImageResolver(func(m messages.MessageItem) []string {
+		return cachedMessageImagePaths(m, imageCache)
+	})
+
 	// Wire theme switcher: dispatch to the appropriate saver based on scope.
 	app.SetThemeSaver(func(name string, scope themeswitcher.ThemeScope) {
 		switch scope {
@@ -1982,6 +1990,45 @@ func fetchBrowseableChannels(ctx context.Context, wctx *WorkspaceContext, p *tea
 // title separate from the original filename); otherwise we fall back to
 // the filename. Image mimetypes get the "image" kind so the renderer can
 // show [Image]; everything else gets "file" -> [File].
+// cachedMessageImagePaths returns on-disk paths of a message's image
+// attachments that are already in the image cache (rendered previously).
+// Best-effort and non-blocking: the cache key embeds the rendered thumb
+// size, so it probes a few target sizes. Uncached images are skipped (no
+// download); fetching originals on demand is a planned follow-up.
+func cachedMessageImagePaths(m messages.MessageItem, imageCache *imgpkg.Cache) []string {
+	if imageCache == nil {
+		return nil
+	}
+	probes := []image.Point{{X: 200, Y: 200}, {X: 400, Y: 400}, {X: 800, Y: 800}, {X: 1600, Y: 1600}}
+	var paths []string
+	for _, att := range m.Attachments {
+		if att.Kind != "image" || att.FileID == "" || len(att.Thumbs) == 0 {
+			continue
+		}
+		thumbs := make([]imgpkg.ThumbSpec, len(att.Thumbs))
+		for i, t := range att.Thumbs {
+			thumbs[i] = imgpkg.ThumbSpec{URL: t.URL, W: t.W, H: t.H}
+		}
+		seen := map[string]bool{}
+		for _, tg := range probes {
+			_, suffix := imgpkg.PickThumb(thumbs, tg)
+			if suffix == "" {
+				continue
+			}
+			key := att.FileID + "-" + suffix
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if path, ok := imageCache.Get(key); ok {
+				paths = append(paths, path)
+				break
+			}
+		}
+	}
+	return paths
+}
+
 func extractAttachments(files []slack.File) []messages.Attachment {
 	if len(files) == 0 {
 		return nil

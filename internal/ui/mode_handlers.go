@@ -53,6 +53,8 @@ var modeHandlers = map[Mode]modeHandler{
 	ModeCommand:              handleCommandMode,
 	ModeChannelFinder:        handleChannelFinderMode,
 	ModeNewMessage:           handleNewMessageMode,
+	ModeExtCmd:               handleExtCmdMode,
+	ModeExtCmdOutput:         handleExtCmdOutputMode,
 	ModeReactionPicker:       handleReactionPickerMode,
 	ModeConfirm:              handleConfirmMode,
 	ModeWorkspaceFinder:      handleWorkspaceFinderMode,
