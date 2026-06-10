@@ -7,6 +7,7 @@
 package cache
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 )
@@ -68,4 +69,65 @@ func (db *DB) migrateSearch() error {
 		}
 	}
 	return tx.Commit()
+}
+
+// SearchChannelMessages returns the ts values of non-deleted messages
+// in (channelID, workspaceID) whose text matches the query, newest
+// first. Matching is word-prefix, case- and accent-insensitive (FTS5
+// unicode61 remove_diacritics 2). When FTS is unavailable it degrades
+// to a substring LIKE scan (ASCII case-insensitive only).
+func (db *DB) SearchChannelMessages(channelID, workspaceID, query string) ([]string, error) {
+	if db.ftsDisabled {
+		return db.searchChannelMessagesLike(channelID, workspaceID, query)
+	}
+	match := buildFTSQuery(query)
+	if match == "" {
+		return nil, nil
+	}
+	rows, err := db.conn.Query(`
+		SELECT m.ts
+		FROM messages_fts f
+		JOIN messages m ON m.rowid = f.rowid
+		WHERE messages_fts MATCH ?
+		  AND m.channel_id = ? AND m.workspace_id = ? AND m.is_deleted = 0
+		ORDER BY m.ts DESC`, match, channelID, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("searching messages: %w", err)
+	}
+	return scanTSColumn(rows)
+}
+
+// searchChannelMessagesLike is the degraded path: every term must
+// appear as a substring (LIKE is case-insensitive for ASCII).
+func (db *DB) searchChannelMessagesLike(channelID, workspaceID, query string) ([]string, error) {
+	terms := strings.Fields(query)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	q := `SELECT ts FROM messages WHERE channel_id = ? AND workspace_id = ? AND is_deleted = 0`
+	args := []any{channelID, workspaceID}
+	for _, term := range terms {
+		q += ` AND text LIKE ? ESCAPE '\'`
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(term)
+		args = append(args, "%"+escaped+"%")
+	}
+	q += ` ORDER BY ts DESC`
+	rows, err := db.conn.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("searching messages (like): %w", err)
+	}
+	return scanTSColumn(rows)
+}
+
+func scanTSColumn(rows *sql.Rows) ([]string, error) {
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var ts string
+		if err := rows.Scan(&ts); err != nil {
+			return nil, fmt.Errorf("scanning search result: %w", err)
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
 }

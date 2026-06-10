@@ -144,3 +144,109 @@ func TestBuildFTSQuery(t *testing.T) {
 		}
 	}
 }
+
+func seedSearchMessages(t *testing.T, db *DB) {
+	t.Helper()
+	db.UpsertChannel(Channel{ID: "C1", WorkspaceID: "T1", Name: "general", Type: "channel", IsMember: true})
+	for _, m := range []Message{
+		{TS: "1700000001.000000", ChannelID: "C1", WorkspaceID: "T1", Text: "deploy went fine"},
+		{TS: "1700000002.000000", ChannelID: "C1", WorkspaceID: "T1", Text: "café is open"},
+		{TS: "1700000003.000000", ChannelID: "C1", WorkspaceID: "T1", Text: "deployment failed badly"},
+		{TS: "1700000004.000000", ChannelID: "C1", WorkspaceID: "T1", Text: "unrelated chatter"},
+		{TS: "1700000005.000000", ChannelID: "C2", WorkspaceID: "T1", Text: "deploy in other channel"},
+		{TS: "1700000006.000000", ChannelID: "C1", WorkspaceID: "T2", Text: "deploy in other workspace"},
+		{TS: "1700000007.000000", ChannelID: "C1", WorkspaceID: "T1", Text: "deleted deploy note", IsDeleted: true},
+	} {
+		if err := db.UpsertMessage(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSearchChannelMessages(t *testing.T) {
+	db := setupDBWithWorkspace(t)
+	defer db.Close()
+	seedSearchMessages(t, db)
+
+	got, err := db.SearchChannelMessages("C1", "T1", "deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Word-prefix: matches "deploy" and "deployment"; newest first.
+	// Other channel, other workspace, and soft-deleted rows excluded.
+	want := []string{"1700000003.000000", "1700000001.000000"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
+func TestSearchChannelMessages_AccentAndCaseInsensitive(t *testing.T) {
+	db := setupDBWithWorkspace(t)
+	defer db.Close()
+	seedSearchMessages(t, db)
+
+	got, err := db.SearchChannelMessages("C1", "T1", "CAFE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "1700000002.000000" {
+		t.Fatalf("accent/case fold: got %v", got)
+	}
+}
+
+func TestSearchChannelMessages_MultiTermAND(t *testing.T) {
+	db := setupDBWithWorkspace(t)
+	defer db.Close()
+	seedSearchMessages(t, db)
+
+	got, err := db.SearchChannelMessages("C1", "T1", "deploy failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "1700000003.000000" {
+		t.Fatalf("AND semantics: got %v", got)
+	}
+}
+
+func TestSearchChannelMessages_EmptyQuery(t *testing.T) {
+	db := setupDBWithWorkspace(t)
+	defer db.Close()
+	seedSearchMessages(t, db)
+
+	got, err := db.SearchChannelMessages("C1", "T1", "   ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("empty query: got %v", got)
+	}
+}
+
+func TestSearchChannelMessages_LikeFallback(t *testing.T) {
+	db := setupDBWithWorkspace(t)
+	defer db.Close()
+	seedSearchMessages(t, db)
+	db.ftsDisabled = true
+
+	got, err := db.SearchChannelMessages("C1", "T1", "deploy failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "1700000003.000000" {
+		t.Fatalf("LIKE fallback: got %v", got)
+	}
+
+	// LIKE wildcards in user input must be escaped, not interpreted.
+	got, err = db.SearchChannelMessages("C1", "T1", "%")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("LIKE escape: %% matched %v", got)
+	}
+}
