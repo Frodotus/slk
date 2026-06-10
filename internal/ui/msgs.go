@@ -393,6 +393,14 @@ type MessageDeletedMsg struct {
 	Err       error
 }
 
+// OpenLinkMsg requests that a URL be opened. This is the single
+// routing point for all link opens (issue #62): the reduceLinks
+// reducer either navigates in-app (Slack archive permalinks for the
+// active workspace) or launches the OS browser. Dispatched by the
+// `o` keybinding (directly for single-link messages) and by the link
+// picker modal.
+type OpenLinkMsg struct{ URL string }
+
 // MarkUnreadMsg requests the App to mark the given message as unread.
 // ThreadTS is "" for channel-level mark-unread; non-empty for thread-level
 // (in which case ChannelID is the parent channel and BoundaryTS is the

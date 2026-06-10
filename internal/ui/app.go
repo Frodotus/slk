@@ -239,6 +239,16 @@ type App struct {
 	// router to match permalink hosts against the active workspace.
 	workspaceDomains map[string]string
 
+	// pendingLinkNav tracks an in-flight permalink navigation: the
+	// channel was (or is being) opened and the message-select /
+	// thread-open completes when that channel's messages land. See
+	// reducer_links.go.
+	pendingLinkNav *pendingLinkNav
+
+	// browserOpener launches a URL in the OS browser. Defaults to
+	// openURLCmd; tests inject fakes.
+	browserOpener func(url string) tea.Cmd
+
 	// navHistory owns the per-workspace ctrl+h / ctrl+k browser-style
 	// jump list. See internal/ui/navhistory.go. Lazy-initialized on
 	// first push for each team. Cleared only when slk exits — the
@@ -403,6 +413,7 @@ func NewApp() *App {
 		channels:             noopChannelService,
 		lastChannelByTeam:    map[string]string{},
 		workspaceDomains:     map[string]string{},
+		browserOpener:        openURLCmd,
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
 	}
@@ -470,6 +481,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		reduceThreads,
 		reduceSend,
 		reduceChannels,
+		reduceLinks,
 		reduceWorkspace,
 		reduceNewMessagePicker,
 		reduceIO,
@@ -1942,6 +1954,32 @@ func openInSystemViewerCmd(path string) tea.Cmd {
 		}
 		if err := cmd.Start(); err != nil {
 			log.Printf("system viewer launch failed: %v", err)
+		}
+		return nil
+	}
+}
+
+// openURLCmd asynchronously launches the OS default browser for url.
+// Same launcher matrix as openInSystemViewerCmd (xdg-open / open /
+// rundll32). A failed launch surfaces a toast — unlike the image
+// viewer, the user otherwise gets no feedback at all.
+func openURLCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		if url == "" {
+			return nil
+		}
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("open", url)
+		case "windows":
+			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		default:
+			cmd = exec.Command("xdg-open", url)
+		}
+		if err := cmd.Start(); err != nil {
+			log.Printf("browser launch failed: %v", err)
+			return ToastMsg{Text: "Failed to open link"}
 		}
 		return nil
 	}

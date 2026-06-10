@@ -61,7 +61,15 @@ import (
 var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	switch m := msg.(type) {
 	case ChannelSelectedMsg:
-		return reduceChannelSelected(a, m), true
+		cmd := reduceChannelSelected(a, m)
+		// Best-effort permalink completion against whatever cache
+		// tier just rendered; MessagesLoadedMsg (if a fetch was
+		// fired) retries authoritatively. Also drops a stale pending
+		// nav when the user navigated to an unrelated channel.
+		if nav := a.completePendingLinkNav(m.ID, false); nav != nil {
+			cmd = tea.Batch(cmd, nav)
+		}
+		return cmd, true
 
 	case MessagesLoadedMsg:
 		// Distinguish the three cases of the fetcher's nil-vs-[]
@@ -95,7 +103,9 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if m.Messages != nil {
 			a.messagepane.SetMessages(m.Messages)
 		}
-		return nil, true
+		// Authoritative permalink completion: this is the freshest
+		// data we'll get for this channel.
+		return a.completePendingLinkNav(m.ChannelID, true), true
 
 	case OlderMessagesLoadedMsg:
 		debuglog.Cache("OlderMessagesLoadedMsg: channel=%s active=%s count=%d",
