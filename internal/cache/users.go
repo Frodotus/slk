@@ -1,6 +1,9 @@
 package cache
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type User struct {
 	ID          string
@@ -22,6 +25,12 @@ type User struct {
 }
 
 func (db *DB) UpsertUser(u User) error {
+	// Stamp the sync time so the identity-TTL refresh can tell stale rows
+	// from fresh ones. Callers that set UpdatedAt explicitly (e.g. tests)
+	// are respected; everyone else records "synced now".
+	if u.UpdatedAt == 0 {
+		u.UpdatedAt = time.Now().Unix()
+	}
 	_, err := db.conn.Exec(`
 		INSERT INTO users (id, workspace_id, name, display_name, avatar_url, presence, is_bot, is_external, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
