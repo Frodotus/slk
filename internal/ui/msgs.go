@@ -542,6 +542,23 @@ type editEmptyToastMsg struct{}
 // to ModeNewMessage.
 type EnterNewMessageMsg struct{}
 
+// EnterExternalCmdMsg is dispatched when the user presses the external-
+// command hotkey (x) on a selected message. The reducer captures the
+// target message, seeds the command picker, and switches to ModeExtCmd.
+type EnterExternalCmdMsg struct{}
+
+// ExternalCmdDoneMsg reports a finished non-interactive external command.
+// Fields are flattened (rather than carrying extcmd.Result) to keep msgs
+// dependency-light.
+type ExternalCmdDoneMsg struct {
+	Name     string
+	Stdout   string
+	Stderr   string
+	ExitCode int
+	Failed   bool // failed to start or exited non-zero
+	Capture  bool // show stdout in an overlay rather than a toast
+}
+
 // NewMessageOpenedMsg carries the result of a successful
 // ChannelService.OpenConversation call. RequestID identifies which
 // submit this is the response to so the reducer can drop late

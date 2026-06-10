@@ -31,6 +31,7 @@ import (
 	"github.com/gammons/slk/internal/ui/compose"
 	"github.com/gammons/slk/internal/ui/confirmprompt"
 	"github.com/gammons/slk/internal/ui/emojipicker"
+	"github.com/gammons/slk/internal/ui/extcmdpicker"
 	"github.com/gammons/slk/internal/ui/help"
 	"github.com/gammons/slk/internal/ui/imgrender"
 	"github.com/gammons/slk/internal/ui/linkpicker"
@@ -92,6 +93,7 @@ type App struct {
 	statusbar        statusbar.Model
 	channelFinder    channelfinder.Model
 	newMessagePicker newmessagepicker.Model
+	extCmdPicker     extcmdpicker.Model
 	workspaceFinder  workspacefinder.Model
 	themeSwitcher    themeswitcher.Model
 	presenceMenu     presencemenu.Model
@@ -232,6 +234,16 @@ type App struct {
 	// NewMessageOpenedMsg with the matching RequestID is dropped
 	// rather than switching channels behind the user's back.
 	newMessageCancelled bool
+
+	// External commands (run on the selected message via `x`).
+	externalCommands    []config.ExternalCommand
+	extCmdTargetMsg     messages.MessageItem // message the picker was opened on
+	extCmdTargetChannel string
+	extCmdOutput        string // captured stdout shown in the output overlay
+	extCmdOutputName    string // command name for the output overlay header
+	// extCmdImageResolver maps a message to on-disk paths of its cached
+	// images. Injected by main (which owns the image cache); nil = none.
+	extCmdImageResolver func(messages.MessageItem) []string
 
 	// Workspace switching
 	workspaceSwitcher SwitchWorkspaceFunc
@@ -392,6 +404,7 @@ func NewApp() *App {
 		statusbar:            statusbar.New(),
 		channelFinder:        channelfinder.New(),
 		newMessagePicker:     newmessagepicker.New(),
+		extCmdPicker:         extcmdpicker.New(),
 		workspaceFinder:      workspacefinder.New(),
 		themeSwitcher:        themeswitcher.New(),
 		presenceMenu:         presencemenu.New(),
@@ -491,6 +504,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.typing,
 		a.bootstrap,
 		reduceReactions,
+		reduceExtCmd,
 		reduceThreads,
 		reduceSend,
 		reduceChannels,

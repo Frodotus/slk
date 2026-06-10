@@ -22,6 +22,27 @@ type Config struct {
 	Sections      map[string]SectionDef `toml:"sections"`
 	Theme         Theme                 `toml:"theme"`
 	Workspaces    map[string]Workspace  `toml:"workspaces"`
+	// ExternalCommands are user-defined commands runnable on the selected
+	// message via the command picker (default hotkey: x).
+	ExternalCommands []ExternalCommand `toml:"external_commands"`
+}
+
+// ExternalCommand defines a program runnable against the selected message.
+// Argv is executed directly (no shell). The message text is piped to the
+// command's stdin and metadata is provided via env vars (SLK_TEXT,
+// SLK_USER, SLK_TS, SLK_CHANNEL, SLK_CHANNEL_NAME, SLK_IMAGE_PATHS,
+// SLK_IMAGE_COUNT).
+type ExternalCommand struct {
+	Name string   `toml:"name"` // shown in the picker
+	Argv []string `toml:"argv"` // program + args, run without a shell
+	// CaptureOutput shows the command's stdout in a scrollable overlay
+	// instead of a completion toast. Mutually exclusive with Interactive.
+	CaptureOutput bool `toml:"capture_output"`
+	// Interactive releases the terminal and runs the command attached to
+	// it (for editors / TUI tools), restoring slk on exit.
+	Interactive bool `toml:"interactive"`
+	// Confirm prompts before running.
+	Confirm bool `toml:"confirm"`
 }
 
 // SectionDef defines a sidebar section with channel name patterns.
@@ -251,6 +272,23 @@ func Load(path string) (Config, error) {
 	// (unset) and any unrecognized value fall back to "on".
 	if cfg.Appearance.EmojiImages != "on" && cfg.Appearance.EmojiImages != "off" {
 		cfg.Appearance.EmojiImages = "on"
+	}
+
+	// Drop malformed external commands (need a name and a program) and
+	// resolve the mutually-exclusive flags: interactive wins over
+	// capture_output (you can't capture a command that owns the terminal).
+	if len(cfg.ExternalCommands) > 0 {
+		valid := cfg.ExternalCommands[:0]
+		for _, c := range cfg.ExternalCommands {
+			if c.Name == "" || len(c.Argv) == 0 || c.Argv[0] == "" {
+				continue
+			}
+			if c.Interactive {
+				c.CaptureOutput = false
+			}
+			valid = append(valid, c)
+		}
+		cfg.ExternalCommands = valid
 	}
 
 	return cfg, nil

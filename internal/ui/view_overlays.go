@@ -43,6 +43,12 @@ func (a *App) applyOverlays(screen string) string {
 	if a.newMessagePicker.IsVisible() {
 		screen = a.newMessagePicker.ViewOverlay(a.width, a.height, screen)
 	}
+	if a.extCmdPicker.IsVisible() {
+		screen = a.extCmdPicker.ViewOverlay(a.width, a.height, screen)
+	}
+	if a.mode == ModeExtCmdOutput && a.extCmdOutput != "" {
+		screen = a.extCmdOutputOverlay(a.width, a.height, screen)
+	}
 	if a.reactionPicker.IsVisible() {
 		screen = a.reactionPicker.ViewOverlay(a.width, a.height, screen)
 	}
@@ -83,6 +89,8 @@ func (a *App) applyOverlays(screen string) string {
 func (a *App) overlayActive() bool {
 	return a.channelFinder.IsVisible() ||
 		a.newMessagePicker.IsVisible() ||
+		a.extCmdPicker.IsVisible() ||
+		a.mode == ModeExtCmdOutput ||
 		a.reactionPicker.IsVisible() ||
 		a.confirmPrompt.IsVisible() ||
 		a.workspaceFinder.IsVisible() ||
