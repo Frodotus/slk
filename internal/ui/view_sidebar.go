@@ -21,8 +21,6 @@
 package ui
 
 import (
-	"charm.land/lipgloss/v2"
-
 	"github.com/gammons/slk/internal/ui/styles"
 )
 
@@ -48,20 +46,7 @@ func (a *App) renderSidebar(sidebarWidth, sidebarBorder, contentHeight int, them
 		return c.output
 	}
 
-	borderStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Border).
-		BorderBackground(styles.SidebarBackground).
-		Background(styles.SidebarBackground).
-		Width(sidebarWidth)
-	if sbFocused {
-		borderStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.ThickBorder()).
-			BorderForeground(styles.Primary).
-			BorderBackground(styles.SidebarBackground).
-			Background(styles.SidebarBackground).
-			Width(sidebarWidth)
-	}
+	borderStyle := a.paneBorderStyle(sbFocused, styles.SidebarBackground).Width(sidebarWidth)
 	sidebarView := a.sidebar.View(contentHeight-2, sidebarWidth)
 	sidebarView = borderStyle.Render(sidebarView)
 	out := exactSizeBg(sidebarView, sidebarWidth+sidebarBorder, contentHeight, styles.SidebarBackground)

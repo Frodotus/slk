@@ -540,6 +540,7 @@ func run() error {
 
 	// Create app
 	app := ui.NewApp()
+	app.SetPanelBorders(cfg.Appearance.PanelBorders)
 	app.SetHelpFooter(versionpkg.ModalFooter(version))
 	app.SetClipboardAvailable(clipboardOK)
 	if useWaylandClipboard {

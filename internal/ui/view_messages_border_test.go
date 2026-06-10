@@ -88,7 +88,7 @@ func TestBorderedTopPane_MatchesLipgloss(t *testing.T) {
 				full := msgWidth + msgBorder
 
 				want := padPaneToSize(topBorderStyleForTest(msgWidth, focused).Render(msgView), msgWidth, full, topHeight, styles.Background)
-				got := borderedTopPane(msgView, msgWidth-2, full, topHeight, focused, styles.Background)
+				got := borderedTopPane(msgView, msgWidth-2, full, topHeight, a.paneBorderStyle(focused, styles.Background), styles.Background)
 
 				wl := strings.Split(want, "\n")
 				gl := strings.Split(got, "\n")

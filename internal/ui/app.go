@@ -207,6 +207,12 @@ type App struct {
 	reactions     ReactionService
 	currentUserID string
 
+	// panelBorders draws the box border around each pane. When false,
+	// panes use a thin left accent bar instead (see paneBorderStyle).
+	// Defaulted to true in NewApp; overridden by SetPanelBorders from
+	// config at startup.
+	panelBorders bool
+
 	// editing tracks in-progress message edit state. See
 	// internal/ui/edit.go.
 	editing *editController
@@ -358,6 +364,7 @@ type App struct {
 
 func NewApp() *App {
 	app := &App{
+		panelBorders:         true,
 		workspaceRail:        workspace.New(nil, 0),
 		sidebar:              sidebar.New(nil),
 		messagepane:          messages.New(nil, ""),
