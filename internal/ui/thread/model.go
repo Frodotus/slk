@@ -570,6 +570,15 @@ func (m *Model) SetAvatarFunc(fn messages.AvatarFunc) {
 	m.avatarFn = fn
 }
 
+// avatarFor returns the rendered avatar for a user, or "" when no avatar
+// function is wired (so renderThreadMessage skips the gutter).
+func (m *Model) avatarFor(userID string) string {
+	if m.avatarFn == nil {
+		return ""
+	}
+	return m.avatarFn(userID)
+}
+
 // SetUserNames sets the user ID -> display name map for mention resolution.
 // Bumps userNamesV unconditionally so chromeCache (and any other cache
 // keyed by this version counter) sees the change via a simple `!=` check.
@@ -1267,7 +1276,7 @@ func (m *Model) View(height, width int) string {
 	// parent attachments are rare and threading flushes through the cache
 	// lifecycle adds complexity; reply flushes and hit rects ARE captured
 	// in the per-reply loop below.
-	parentContent, _, _ := m.renderThreadMessage(m.parent, width, m.userNames, m.channelNames, false)
+	parentContent, _, _ := m.renderThreadMessage(m.parent, width, m.avatarFor(m.parent.UserID), m.userNames, m.channelNames, false)
 	parentSeparator := lipgloss.NewStyle().
 		Width(width).
 		Background(styles.Background).
@@ -1363,7 +1372,7 @@ func (m *Model) View(height, width int) string {
 			// so the cache rebuilds whenever the highlighted index changes.
 			// This matches the messages-pane convention
 			// (internal/ui/messages/model.go:1050).
-			rendered, attachFlushes, reactHits := m.renderThreadMessage(reply, width, m.userNames, m.channelNames, i == m.selected)
+			rendered, attachFlushes, reactHits := m.renderThreadMessage(reply, width, m.avatarFor(reply.UserID), m.userNames, m.channelNames, i == m.selected)
 			// Two filled variants — see internal/ui/messages/model.go for the
 			// rationale. Without per-variant fills, the trailing whitespace of
 			// every wrapped line shows the wrong bg and the tint stops at the
@@ -1738,10 +1747,18 @@ func (m *Model) blockkitContext(msg messages.MessageItem, userNames, channelName
 	}
 }
 
-func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNames map[string]string, channelNames map[string]string, isSelected bool) (string, []func(io.Writer) error, []reactionEntryHit) {
+func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, avatarStr string, userNames map[string]string, channelNames map[string]string, isSelected bool) (string, []func(io.Writer) error, []reactionEntryHit) {
 	line := styles.Username.Render(msg.UserName) + lipgloss.NewStyle().Background(styles.Background).Render("  ") + styles.Timestamp.Render(msg.Timestamp)
 
-	contentWidth := width - 4
+	// Reserve a left gutter for the avatar (4 cols + 1 gap), mirroring the
+	// messages pane. The gutter is prepended via PlaceAvatarBeside below;
+	// buildCache then adds the 1-col left border, so content lands at
+	// col 1+avatarCols (see the reaction-hit contentColBase below).
+	avatarCols := 0
+	if avatarStr != "" {
+		avatarCols = 5
+	}
+	contentWidth := width - 4 - avatarCols
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -1944,7 +1961,7 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 				Name:   att.Name,
 				URL:    att.URL,
 				Thumbs: imgThumbs,
-			}, m.channelID, msg.TS, contentWidth, 0 /* baseRow */, attIdx, 0 /* contentColBase */)
+			}, m.channelID, msg.TS, contentWidth, 0 /* baseRow */, attIdx, avatarCols /* contentColBase */)
 			blocks = append(blocks, strings.Join(res.Lines, "\n"))
 			flushes = append(flushes, res.Flushes...)
 			attachmentLineCount += len(res.Lines)
@@ -1963,7 +1980,9 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 	// (so contentColBase = 1); it adds no rows.
 	var reactionHits []reactionEntryHit
 	if len(pillSpecs) > 0 && reactionLineCount > 0 {
-		const contentColBase = 1 // thick left border occupies col 0 of linesNormal
+		// col 0 is the thick left border; the avatar gutter (when present)
+		// follows it, so content starts at 1+avatarCols.
+		contentColBase := 1 + avatarCols
 		reactionRowBase := 1 + lipgloss.Height(text) + bkLineCount + attachmentLineCount
 		for _, ps := range pillSpecs {
 			row := reactionRowBase + ps.lineIdx
@@ -1977,5 +1996,9 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 		}
 	}
 
-	return line + "\n" + text + bkBlock + attachmentLines + reactionLine, flushes, reactionHits
+	content := line + "\n" + text + bkBlock + attachmentLines + reactionLine
+	if avatarStr != "" {
+		content = messages.PlaceAvatarBeside(avatarStr, content)
+	}
+	return content, flushes, reactionHits
 }
