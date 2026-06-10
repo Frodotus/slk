@@ -48,6 +48,22 @@ var (
 			BorderBackground(Background).
 			Background(Background)
 
+	// PaneLeftBar is the borderless-mode pane wrapper: a single thin bar
+	// down the left edge, every other border cell a space that blends into
+	// the pane background. Same footprint as a full box border, so it's a
+	// drop-in for the box styles without changing layout math. Callers set
+	// BorderForeground (accent when focused, dim otherwise).
+	PaneLeftBar = lipgloss.Border{
+		Top:         " ",
+		Bottom:      " ",
+		Left:        "▎",
+		Right:       " ",
+		TopLeft:     "▎",
+		TopRight:    " ",
+		BottomLeft:  "▎",
+		BottomRight: " ",
+	}
+
 	// Workspace rail
 	WorkspaceActive = lipgloss.NewStyle().
 			Background(Primary).

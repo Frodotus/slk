@@ -28,6 +28,40 @@ import (
 	"github.com/gammons/slk/internal/ui/styles"
 )
 
+// SetPanelBorders toggles the per-pane box borders (true) versus the thin
+// left-accent-bar style (false). Wired from config at startup.
+func (a *App) SetPanelBorders(enabled bool) { a.panelBorders = enabled }
+
+// paneBorderStyle returns the wrapper style for a pane's border, honoring
+// the panel_borders config. bg is the pane's background (styles.Background
+// for messages/thread, styles.SidebarBackground for the sidebar). When
+// borders are disabled the box is replaced by styles.PaneLeftBar — a single
+// left accent bar (theme accent when focused, dim Border otherwise) with
+// every other border cell blank. The footprint is identical to a box
+// border, so callers add .Width(...) and per-side toggles unchanged.
+func (a *App) paneBorderStyle(focused bool, bg color.Color) lipgloss.Style {
+	fg := styles.Border
+	if focused {
+		fg = styles.Primary
+	}
+	if !a.panelBorders {
+		return lipgloss.NewStyle().
+			BorderStyle(styles.PaneLeftBar).
+			BorderForeground(fg).
+			BorderBackground(bg).
+			Background(bg)
+	}
+	bs := lipgloss.RoundedBorder()
+	if focused {
+		bs = lipgloss.ThickBorder()
+	}
+	return lipgloss.NewStyle().
+		BorderStyle(bs).
+		BorderForeground(fg).
+		BorderBackground(bg).
+		Background(bg)
+}
+
 // joinPanelsHorizontal is a zero-measurement replacement for
 // lipgloss.JoinHorizontal(lipgloss.Top, panels...) for the App.View
 // composite. The view's panels (rail, sidebar, messages, thread) are each
@@ -174,11 +208,7 @@ func exactSize(s string, w, h int) string {
 // TestBorderedTopPane_MatchesLipgloss asserts this across states; if a
 // new unpadded source is introduced, that test fails (a short line yields
 // a row narrower than fullWidth).
-func borderedTopPane(content string, innerWidth, fullWidth, rows int, focused bool, bg color.Color) string {
-	bs := styles.UnfocusedBorder
-	if focused {
-		bs = styles.FocusedBorder
-	}
+func borderedTopPane(content string, innerWidth, fullWidth, rows int, bs lipgloss.Style, bg color.Color) string {
 	bd := bs.GetBorderStyle()
 	fg := bs.GetBorderTopForeground()
 	bbg := bs.GetBorderTopBackground()

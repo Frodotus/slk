@@ -6,19 +6,19 @@
 // sidebar, MESSAGES, thread). It has two top-level branches
 // depending on a.view:
 //
-//   ViewThreads  -> threads-list panel (no compose, no typing
-//                   line). Whole bordered panel is cached on
-//                   threadsView.Version + layout key.
-//   ViewChannels -> message pane + typing row + compose box, with
-//                   a split-cache pattern: bordered top region
-//                   (messages + top edge + sides only, no bottom
-//                   edge) cached on messagepane.Version only;
-//                   bottom region (typing + compose + bottom
-//                   edge + sides) re-rendered fresh each frame.
-//                   The two stack into a continuous bordered
-//                   panel because BorderBottom(false) on the top
-//                   + BorderTop(false) on the bottom lines up the
-//                   border glyphs.
+//	ViewThreads  -> threads-list panel (no compose, no typing
+//	                line). Whole bordered panel is cached on
+//	                threadsView.Version + layout key.
+//	ViewChannels -> message pane + typing row + compose box, with
+//	                a split-cache pattern: bordered top region
+//	                (messages + top edge + sides only, no bottom
+//	                edge) cached on messagepane.Version only;
+//	                bottom region (typing + compose + bottom
+//	                edge + sides) re-rendered fresh each frame.
+//	                The two stack into a continuous bordered
+//	                panel because BorderBottom(false) on the top
+//	                + BorderTop(false) on the bottom lines up the
+//	                border glyphs.
 //
 // PERF (see Phase 2g render-cache discussion + the split-rendering
 // note in the channels branch): caching the entire bordered panel
@@ -115,10 +115,7 @@ func (a *App) renderThreadsViewPanel(msgWidth, msgBorder, contentHeight int, msg
 	if c.hit(tvVersion, msgWidth, contentHeight, msgLayoutKey) {
 		return c.output
 	}
-	msgBorderStyle := styles.UnfocusedBorder.Width(msgWidth)
-	if msgFocused {
-		msgBorderStyle = styles.FocusedBorder.Width(msgWidth)
-	}
+	msgBorderStyle := a.paneBorderStyle(msgFocused, styles.Background).Width(msgWidth)
 	msgContentHeight := contentHeight - 2
 	a.layout.SetMsgHeight(msgContentHeight)
 	if msgContentHeight < 3 {
@@ -197,12 +194,8 @@ func (a *App) renderChannelMessagesPanel(msgWidth, msgBorder, contentHeight int,
 
 	// Fresh bottom region: typing line + compose, with bottom
 	// edge. Same lipgloss/v2 quirk applies.
-	bottomBorderStyle := styles.UnfocusedBorder.Width(msgWidth).
+	bottomBorderStyle := a.paneBorderStyle(msgFocused, styles.Background).Width(msgWidth).
 		BorderTop(false).BorderLeft(true).BorderRight(true).BorderBottom(true)
-	if msgFocused {
-		bottomBorderStyle = styles.FocusedBorder.Width(msgWidth).
-			BorderTop(false).BorderLeft(true).BorderRight(true).BorderBottom(true)
-	}
 	bottomInner := lipgloss.JoinVertical(lipgloss.Left, typingLine, composeView)
 	bottomInner = messages.ReapplyBgAfterResets(bottomInner, messages.BgANSI())
 	bottomBordered := exactSize(
@@ -239,7 +232,8 @@ func (a *App) renderMessagesTop(msgWidth, msgBorder, topHeight, msgContentHeight
 	msgView = messages.ReapplyBgAfterResets(msgView, messages.BgANSI())
 	out := borderedTopPane(
 		msgView,
-		msgWidth-2, msgWidth+msgBorder, topHeight, msgFocused, styles.Background,
+		msgWidth-2, msgWidth+msgBorder, topHeight,
+		a.paneBorderStyle(msgFocused, styles.Background), styles.Background,
 	)
 	c.store(out, topPanelVersion, msgWidth, topHeight, topLayoutKey)
 	return out

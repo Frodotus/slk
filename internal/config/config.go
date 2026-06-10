@@ -13,15 +13,15 @@ import (
 )
 
 type Config struct {
-	General       General                      `toml:"general"`
-	Appearance    Appearance                   `toml:"appearance"`
-	Animations    Animations                   `toml:"animations"`
-	Notifications Notifications                `toml:"notifications"`
-	Cache         CacheConfig                  `toml:"cache"`
-	Sidebar       Sidebar                      `toml:"sidebar"`
-	Sections      map[string]SectionDef        `toml:"sections"`
-	Theme         Theme                        `toml:"theme"`
-	Workspaces    map[string]Workspace         `toml:"workspaces"`
+	General       General               `toml:"general"`
+	Appearance    Appearance            `toml:"appearance"`
+	Animations    Animations            `toml:"animations"`
+	Notifications Notifications         `toml:"notifications"`
+	Cache         CacheConfig           `toml:"cache"`
+	Sidebar       Sidebar               `toml:"sidebar"`
+	Sections      map[string]SectionDef `toml:"sections"`
+	Theme         Theme                 `toml:"theme"`
+	Workspaces    map[string]Workspace  `toml:"workspaces"`
 }
 
 // SectionDef defines a sidebar section with channel name patterns.
@@ -73,6 +73,11 @@ type Appearance struct {
 	Theme           string `toml:"theme"`
 	TimestampFormat string `toml:"timestamp_format"`
 	ShowAvatars     bool   `toml:"show_avatars"`
+	// PanelBorders draws the rounded/thick box border around each pane
+	// (sidebar, messages, thread). When false the boxes are replaced by a
+	// single thin left accent bar per pane — dim as a separator, the theme
+	// accent color on the focused pane. Defaults to true.
+	PanelBorders bool `toml:"panel_borders"`
 	// ImageProtocol controls how inline images are rendered.
 	// One of: "auto", "kitty", "sixel", "halfblock", "off".
 	ImageProtocol string `toml:"image_protocol"`
@@ -171,6 +176,7 @@ func Default() Config {
 		Appearance: Appearance{
 			Theme:           "nord",
 			TimestampFormat: "3:04 PM",
+			PanelBorders:    true,
 			ImageProtocol:   "auto",
 			MaxImageRows:    20,
 			MaxImageCols:    60,
