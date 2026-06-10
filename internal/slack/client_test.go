@@ -149,6 +149,14 @@ type mockSlackAPI struct {
 	uploadFileContextFn             func(ctx context.Context, params slack.UploadFileParameters) (*slack.FileSummary, error)
 	getUsersInConversationContextFn func(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error)
 	openConversationContextFn       func(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error)
+	searchMessagesFn                func(ctx context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error)
+}
+
+func (m *mockSlackAPI) SearchMessagesContext(ctx context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error) {
+	if m.searchMessagesFn != nil {
+		return m.searchMessagesFn(ctx, query, params)
+	}
+	return &slack.SearchMessages{}, nil
 }
 
 func (m *mockSlackAPI) GetConversations(params *slack.GetConversationsParameters) ([]slack.Channel, string, error) {
@@ -2250,5 +2258,44 @@ func TestOpenConversation_AlreadyOpenFlagPropagates(t *testing.T) {
 	}
 	if !alreadyOpen {
 		t.Error("expected alreadyOpen=true")
+	}
+}
+
+func TestSearchMessages_PassesQueryVerbatim(t *testing.T) {
+	var gotQuery string
+	var gotParams slack.SearchParameters
+	mock := &mockSlackAPI{
+		searchMessagesFn: func(ctx context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error) {
+			gotQuery = query
+			gotParams = params
+			return &slack.SearchMessages{Total: 2}, nil
+		},
+	}
+	c := &Client{api: mock}
+
+	res, err := c.SearchMessages(context.Background(), "from:@grant in:#general deploy", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "from:@grant in:#general deploy" {
+		t.Errorf("query mangled: %q", gotQuery)
+	}
+	if gotParams.Count != 50 {
+		t.Errorf("count = %d, want 50", gotParams.Count)
+	}
+	if res.Total != 2 {
+		t.Errorf("total = %d", res.Total)
+	}
+}
+
+func TestSearchMessages_WrapsError(t *testing.T) {
+	mock := &mockSlackAPI{
+		searchMessagesFn: func(ctx context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error) {
+			return nil, errors.New("ratelimited")
+		},
+	}
+	c := &Client{api: mock}
+	if _, err := c.SearchMessages(context.Background(), "x", 50); err == nil {
+		t.Fatal("expected error")
 	}
 }

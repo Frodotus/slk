@@ -26,6 +26,7 @@ type SlackAPI interface {
 	GetConversationsForUser(params *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error)
 	GetConversationHistory(params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
 	GetConversationReplies(params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error)
+	SearchMessagesContext(ctx context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error)
 	GetUsersContext(ctx context.Context, options ...slack.GetUsersOption) ([]slack.User, error)
 	GetUsersInConversationContext(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error)
 	GetUserInfo(user string) (*slack.User, error)
@@ -548,6 +549,20 @@ func (c *Client) GetOlderHistory(ctx context.Context, channelID string, limit in
 	}
 
 	return resp.Messages, nil
+}
+
+// SearchMessages runs a workspace-wide message search via Slack's
+// search.messages endpoint. The query string is passed through
+// verbatim, so Slack-side modifiers (from:, in:, before:, ...) work
+// unmodified. Results are relevance-sorted (Slack's default).
+func (c *Client) SearchMessages(ctx context.Context, query string, count int) (*slack.SearchMessages, error) {
+	params := slack.NewSearchParameters()
+	params.Count = count
+	res, err := c.api.SearchMessagesContext(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("searching messages: %w", err)
+	}
+	return res, nil
 }
 
 // GetHistorySince fetches all messages newer than `oldest` in the
