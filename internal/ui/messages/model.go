@@ -2264,6 +2264,13 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 	return msgContent, append(allFlushes, flushes...), allSixel, hits, reactionHits
 }
 
+// PlaceAvatarBeside is the exported entry point for placeAvatarBeside,
+// letting the thread panel render reply avatars with the identical
+// 4-col-wide, 2-row-tall left-gutter layout used by the messages pane.
+func PlaceAvatarBeside(avatar, content string) string {
+	return placeAvatarBeside(avatar, content)
+}
+
 // placeAvatarBeside renders the avatar to the left of the message content.
 // The avatar is 4 cols wide, 2 rows tall. Message content flows to the right.
 func placeAvatarBeside(avatar, content string) string {
