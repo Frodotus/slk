@@ -1116,15 +1116,19 @@ func (m *Model) buildCache(width int) {
 	cursorSelected := cursorStyle.Render("▌")
 	activeBorder := activeBorderStyle.Render("▌")
 	unreadDotStr := dotStyle.Render("●")
-	privatePrefix := privateStyle.Render("◆ ")
-	// Read private channels use a *plain* "◆ " glyph (no inline ANSI
+	// Private channels use a padlock glyph (U+F023), a single-width PUA
+	// codepoint covered by common symbol fonts (e.g. Symbols Nerd Font)
+	// and resolved via fontconfig fallback. Matches the "# " public-
+	// channel prefix width (glyph + trailing space).
+	privatePrefix := privateStyle.Render(" ")
+	// Read private channels use a *plain* " " glyph (no inline ANSI
 	// styling) so the prefix inherits the surrounding row style the
 	// same way the public-channel "# " does. Inline-styled prefixes
 	// emit an ANSI reset; ReapplyBgAfterResets then re-injects the
 	// brighter SidebarFgANSI for everything after the reset, which
 	// overrides ChannelNormal's TextMuted foreground and made read
 	// private rows appear lighter than read public rows.
-	privatePrefixMuted := "◆ "
+	privatePrefixMuted := " "
 	dmActivePrefix := styles.PresenceOnline.Render("● ")
 	dmAwayPrefix := styles.PresenceAway.Render("○ ")
 	// Apps use a filled square glyph to visually distinguish them from
