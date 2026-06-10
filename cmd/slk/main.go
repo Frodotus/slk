@@ -95,10 +95,10 @@ func (a sectionsProviderAdapter) OrderedSlackSections() []sidebar.SectionMeta {
 
 // WorkspaceContext holds all state for a single connected workspace.
 type WorkspaceContext struct {
-	Client      *slackclient.Client
-	ConnMgr     *slackclient.ConnectionManager
-	RTMHandler  *rtmEventHandler
-	UserNames   map[string]string
+	Client     *slackclient.Client
+	ConnMgr    *slackclient.ConnectionManager
+	RTMHandler *rtmEventHandler
+	UserNames  map[string]string
 	// AvatarURLs maps userID -> avatar image URL. Populated from the
 	// local users cache at connect time (synchronous, before any
 	// goroutines spin up) and refreshed from the background
@@ -122,7 +122,7 @@ type WorkspaceContext struct {
 	// background users.list fetch and any on-demand resolveUser calls.
 	// Used during channel construction to bucket app DMs into a separate
 	// "Apps" sidebar section.
-	BotUserIDs        map[string]bool
+	BotUserIDs map[string]bool
 	// SectionStore holds the user's Slack-native sidebar sections for
 	// this workspace. Nil when use_slack_sections is disabled, the
 	// REST bootstrap failed, or this workspace hasn't connected yet.
@@ -151,7 +151,7 @@ type WorkspaceContext struct {
 	// after a failed one. The UI uses it to decide whether to draw
 	// the "Threads list unavailable" banner.
 	SubscriptionsAvailable bool
-	Channels    []sidebar.ChannelItem
+	Channels               []sidebar.ChannelItem
 	// FinderItems is the merged list shown in the Ctrl+T finder. Initially
 	// contains only joined channels; the BrowseableChannelsLoadedMsg pipeline
 	// extends it with non-joined public channels in the background.
@@ -1598,19 +1598,19 @@ func run() error {
 			// Resolve unknown DM user names in background
 			if len(wctx.UnresolvedDMs) > 0 {
 				go func() {
-				for _, dm := range wctx.UnresolvedDMs {
-					resolved, isBot := resolveUser(wctx.Client, dm.UserID, wctx.UserNames, db, avatarCache)
-					if isBot {
-						wctx.BotUserIDs[dm.UserID] = true
+					for _, dm := range wctx.UnresolvedDMs {
+						resolved, isBot := resolveUser(wctx.Client, dm.UserID, wctx.UserNames, db, avatarCache)
+						if isBot {
+							wctx.BotUserIDs[dm.UserID] = true
+						}
+						if resolved != dm.UserID {
+							p.Send(ui.DMNameResolvedMsg{
+								ChannelID:   dm.ChannelID,
+								DisplayName: resolved,
+								IsBot:       isBot,
+							})
+						}
 					}
-					if resolved != dm.UserID {
-						p.Send(ui.DMNameResolvedMsg{
-							ChannelID:   dm.ChannelID,
-							DisplayName: resolved,
-							IsBot:       isBot,
-						})
-					}
-				}
 				}()
 			}
 		}(ot.Token)
@@ -1862,6 +1862,13 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 		finderItem.LastVisited = wctx.LastVisitedByChannel[ch.ID]
 		wctx.FinderItems = append(wctx.FinderItems, finderItem)
 	}
+
+	// Now that the DM peers are known, subscribe to their presence (plus
+	// self). The WebSocket is already connected (Connect above), so this
+	// runs on first boot; OnConnect re-runs it on each reconnect. Slack
+	// pushes each subscribed user's current presence back, which feeds the
+	// sidebar's online dots without a separate per-user fetch.
+	subscribeWorkspacePresence(wctx)
 
 	// Fetch unread counts
 	unreadCounts, threadsAgg, ucErr := client.GetUnreadCounts()
@@ -2302,12 +2309,12 @@ func markChannelReadAsync(
 // Allocated only when debuglog.Enabled(); enrichCachedRow checks for
 // nil and skips the time.Now() / time.Since() calls otherwise.
 type enrichPerfStats struct {
-	getUserCalls    int
-	getUserTotal    time.Duration
-	getReactCalls   int
-	getReactTotal   time.Duration
-	unmarshalCalls  int
-	unmarshalTotal  time.Duration
+	getUserCalls   int
+	getUserTotal   time.Duration
+	getReactCalls  int
+	getReactTotal  time.Duration
+	unmarshalCalls int
+	unmarshalTotal time.Duration
 }
 
 func loadCachedMessages(
@@ -2786,10 +2793,13 @@ func bootstrapPresenceAndDND(ctx context.Context, wctx *WorkspaceContext, progra
 		return
 	}
 
-	// Subscribe so future presence_change events for our own user arrive.
-	// Failure is non-fatal — manual_presence_change and dnd_updated work
-	// without an explicit subscription.
-	_ = wctx.Client.SubscribePresence([]string{wctx.UserID})
+	// Subscribe to presence for our own user plus every DM peer so the
+	// sidebar can show who is online. presence_sub REPLACES the prior
+	// subscription set, so self and peers must go in one call. Failure is
+	// non-fatal. Re-runs on every reconnect (this is called from
+	// OnConnect), which is required because the subscription is
+	// connection-scoped.
+	subscribeWorkspacePresence(wctx)
 
 	// Initial presence fetch
 	if p, err := wctx.Client.GetUserPresence(ctx, wctx.UserID); err == nil && p != nil {
@@ -2832,6 +2842,54 @@ func bootstrapPresenceAndDND(ctx context.Context, wctx *WorkspaceContext, progra
 			DNDEndTS:   wctx.DNDEndTS,
 		})
 	}
+}
+
+// subscribeWorkspacePresence subscribes over the WebSocket to presence
+// updates for the authenticated user plus every 1:1 DM peer, so the
+// sidebar can show who is online. Slack's presence_sub REPLACES the prior
+// subscription set and is connection-scoped, so this sends self + all DM
+// peers in a single call and must be re-run on each (re)connect.
+//
+// presence_sub also pushes each subscribed user's *current* presence back
+// as a presence_change event, so this doubles as the initial fetch — no
+// separate per-user query is needed. Safe to call repeatedly.
+func subscribeWorkspacePresence(wctx *WorkspaceContext) {
+	if wctx == nil || wctx.Client == nil {
+		return
+	}
+	ids := workspacePresenceIDs(wctx)
+	if len(ids) == 0 {
+		return
+	}
+	if err := wctx.Client.SubscribePresence(ids); err != nil {
+		debuglog.General("subscribeWorkspacePresence (%d ids): %v", len(ids), err)
+	}
+}
+
+// workspacePresenceIDs returns the deduped list of user IDs to subscribe
+// for presence: the authenticated user plus every 1:1 DM peer. Group DMs
+// and app/bot DMs (which carry no human presence dot in the sidebar) are
+// skipped. Pure function for testability.
+func workspacePresenceIDs(wctx *WorkspaceContext) []string {
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(wctx.Channels)+1)
+	add := func(uid string) {
+		if uid == "" {
+			return
+		}
+		if _, ok := seen[uid]; ok {
+			return
+		}
+		seen[uid] = struct{}{}
+		ids = append(ids, uid)
+	}
+	add(wctx.UserID) // self — keeps the self presence subscription intact
+	for _, ch := range wctx.Channels {
+		if ch.Type == "dm" {
+			add(ch.DMUserID)
+		}
+	}
+	return ids
 }
 
 // rtmEventHandler bridges WebSocket events into bubbletea messages via p.Send()
