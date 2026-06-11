@@ -223,7 +223,8 @@ type userResolver struct {
 	db       *cache.DB
 	avatars  *avatar.Cache
 	send     func(tea.Msg)
-	inflight sync.Map // userID -> struct{}
+	ttl      time.Duration // identity freshness window; 0 = never refresh
+	inflight sync.Map      // userID -> struct{}
 }
 
 func newUserResolver(
@@ -232,6 +233,7 @@ func newUserResolver(
 	db *cache.DB,
 	avatars *avatar.Cache,
 	send func(tea.Msg),
+	ttl time.Duration,
 ) *userResolver {
 	return &userResolver{
 		teamID:  teamID,
@@ -239,7 +241,18 @@ func newUserResolver(
 		db:      db,
 		avatars: avatars,
 		send:    send,
+		ttl:     ttl,
 	}
+}
+
+// fresh reports whether a cached identity stamped at updatedAt (unix
+// seconds) is still within the TTL. A non-positive TTL disables refresh
+// (identities are trusted forever), preserving the historical behavior.
+func (r *userResolver) fresh(updatedAt int64) bool {
+	if r.ttl <= 0 {
+		return true
+	}
+	return time.Since(time.Unix(updatedAt, 0)) < r.ttl
 }
 
 // Request enqueues a users.info fetch for userID. Returns immediately.
@@ -267,9 +280,15 @@ func (r *userResolver) Request(userID string) {
 	// both miss the cache, both then LoadOrStore (one wins, the loser
 	// silently returns). Store-first + check-second means at most one
 	// goroutine ever passes the cache check.
-	if _, err := r.db.GetUser(userID); err == nil {
-		r.inflight.Delete(userID)
-		return
+	refresh := false
+	if u, err := r.db.GetUser(userID); err == nil {
+		if r.fresh(u.UpdatedAt) {
+			r.inflight.Delete(userID)
+			return
+		}
+		// Cached but past the TTL — fall through to re-fetch so a rename
+		// or new avatar is picked up.
+		refresh = true
 	}
 	go func() {
 		defer r.inflight.Delete(userID)
@@ -306,6 +325,10 @@ func (r *userResolver) Request(userID string) {
 		// Subsequent resolveUserCached misses fall back to the DB
 		// row we just upserted, so we don't re-fetch on every miss
 		// in the small window before UserResolvedMsg lands.
+		if refresh {
+			// Bust the stale render/inflight/disk entry so Preload re-fetches.
+			r.avatars.Invalidate(userID)
+		}
 		r.avatars.Preload(userID, u.Profile.Image32)
 		_ = r.db.UpsertUser(cache.User{
 			ID:          userID,
@@ -345,9 +368,13 @@ func (r *userResolver) RequestBot(botID, username string) {
 	if _, exists := r.inflight.LoadOrStore(botID, struct{}{}); exists {
 		return
 	}
-	if _, err := r.db.GetUser(botID); err == nil {
-		r.inflight.Delete(botID)
-		return
+	refresh := false
+	if u, err := r.db.GetUser(botID); err == nil {
+		if r.fresh(u.UpdatedAt) {
+			r.inflight.Delete(botID)
+			return
+		}
+		refresh = true
 	}
 	go func() {
 		defer r.inflight.Delete(botID)
@@ -364,6 +391,9 @@ func (r *userResolver) RequestBot(botID, username string) {
 			name = botID
 		}
 		iconURL := bestBotIcon(bot.Icons)
+		if refresh {
+			r.avatars.Invalidate(botID)
+		}
 		r.avatars.Preload(botID, iconURL)
 		_ = r.db.UpsertUser(cache.User{
 			ID:          botID,
@@ -1777,6 +1807,10 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 	// UI goroutine via Model.PatchUserName (the single safe writer
 	// for that shared map). p may be nil in tests, in which case
 	// the resolver's send callback is a no-op.
+	identityTTL := time.Duration(cfg.Cache.IdentityTTLDays) * 24 * time.Hour
+	if identityTTL < 0 {
+		identityTTL = 0 // negative is nonsensical; treat as "never refresh" (= 0)
+	}
 	wctx.UserResolver = newUserResolver(
 		wctx.TeamID,
 		wctx.Client,
@@ -1787,6 +1821,7 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 				p.Send(msg)
 			}
 		},
+		identityTTL,
 	)
 
 	// Per-workspace channel-membership manager. *slackclient.Client

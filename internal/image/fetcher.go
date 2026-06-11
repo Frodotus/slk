@@ -168,6 +168,16 @@ func (f *Fetcher) SetAuths(auths []TeamAuth) {
 	f.learnedAuths = sync.Map{} // reset learned mappings on reconfig
 }
 
+// Delete evicts a cached entry by key, forcing the next Fetch for that
+// key to re-download from its URL. Used by avatar refresh when an
+// identity's avatar URL has changed (the cache is keyed by a stable
+// id like "avatar-U123", so a new URL alone wouldn't re-fetch).
+func (f *Fetcher) Delete(key string) {
+	if f.cache != nil {
+		f.cache.Delete(key)
+	}
+}
+
 // ConfigurePrerender enables eager protocol encoding in the fetch
 // goroutine. After every successful Fetch whose request carries a
 // non-zero CellTarget, the decoded image is run through

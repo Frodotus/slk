@@ -32,6 +32,8 @@ quiet_hours = "22:00-08:00"   # planned
 message_retention_days = 30
 max_db_size_mb = 500
 max_image_cache_mb = 200
+identity_ttl_days = 7     # re-fetch a user/bot's name + avatar after N days
+                          # so renames and new avatars show up; 0 = never refresh
 
 # Glob-based channel sections — only consulted when use_slack_sections
 # is false (globally or per-workspace), or when Slack's section API is
