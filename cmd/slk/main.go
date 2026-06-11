@@ -2851,6 +2851,7 @@ func mostRecentlyVisitedChannel(visits map[string]int64) string {
 	}
 	return bestID
 }
+
 // rtmEventHandler bridges WebSocket events into bubbletea messages via p.Send()
 // and caches all incoming messages to the SQLite database.
 type rtmEventHandler struct {
