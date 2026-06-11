@@ -813,8 +813,12 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 					if r.Emoji == emojiName {
 						// Idempotent: only decrement if userID was present.
 						newIDs := messages.RemoveUserID(r.UserIDs, userID)
-						if len(newIDs) == len(r.UserIDs) {
-							break // userID wasn't reacting; nothing to do
+						if len(newIDs) == len(r.UserIDs) && r.Count <= len(r.UserIDs) {
+							// Duplicate echo of an already-applied removal
+							// (un-listed reactor, non-truncated list) — skip.
+							// When Count > len(UserIDs) the list is truncated,
+							// so the removal is real; fall through to decrement.
+							break
 						}
 						r.UserIDs = newIDs
 						r.Count--

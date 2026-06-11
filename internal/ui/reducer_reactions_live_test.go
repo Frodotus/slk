@@ -6,7 +6,36 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/gammons/slk/internal/ui/messages"
+	"github.com/gammons/slk/internal/ui/sidebar"
 )
+
+// TestLiveOwnReactionStyledViaWorkspaceReady drives the PRODUCTION path:
+// WorkspaceReadyMsg sets the current user (and must wire the panes), so a
+// live own-device reaction renders as ours (HasReacted=true). Regression
+// guard for the review on PR #68 — the prior code assigned a.currentUserID
+// directly in the reducer, leaving the pane's currentUserID empty in real
+// sessions even though SetCurrentUserID-based tests passed.
+func TestLiveOwnReactionStyledViaWorkspaceReady(t *testing.T) {
+	a := NewApp()
+	_, _ = a.Update(tea.WindowSizeMsg{Width: 200, Height: 60})
+
+	a.Update(WorkspaceReadyMsg{
+		TeamID:        "T1",
+		InitialActive: true,
+		UserID:        "ME",
+		Channels:      []sidebar.ChannelItem{{ID: "C1", Name: "general", Type: "channel"}},
+	})
+	a.messagepane.SetMessages([]messages.MessageItem{{TS: "100.0", Text: "hi"}})
+
+	a.Update(ReactionAddedMsg{ChannelID: "C1", MessageTS: "100.0", UserID: "ME", Emoji: "tada"})
+	msg, _ := a.messagepane.SelectedMessage()
+	if len(msg.Reactions) != 1 {
+		t.Fatalf("expected 1 reaction, got %+v", msg.Reactions)
+	}
+	if !msg.Reactions[0].HasReacted {
+		t.Error("live own-device reaction must render as ours (HasReacted=true) via the WorkspaceReadyMsg path")
+	}
+}
 
 // TestReactionAddedAppliesOwnUserLive is the headline of the live-reactions
 // fix: a ReactionAddedMsg by OUR OWN user that has no local optimistic

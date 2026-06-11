@@ -6,37 +6,37 @@
 // per-workspace data resolution echoes, and the sidebar / read-state
 // refresh paths:
 //
-//   WorkspaceReadyMsg       - one of the configured workspaces
-//                             finished its initial connect. If
-//                             InitialActive (claimed exactly once),
-//                             activate it: apply theme, push
-//                             channels/users/emoji, open the first
-//                             channel. Always fires an initial
-//                             threads-list fetch.
-//   WorkspaceSwitchedMsg    - user picked a different workspace.
-//                             Tear down per-workspace transient
-//                             state (threads view, edit, selection,
-//                             compose draft), push new channels/users/
-//                             emoji, apply theme, restore the last
-//                             channel viewed for this workspace.
-//   ConversationOpenedMsg   - WS event: a DM/MPIM just opened.
-//                             Upsert into the active sidebar.
-//   SectionsRefreshedMsg    - cache notice: sidebar sections were
-//                             reorganized. Re-push channel items
-//                             for the active workspace.
-//   DMNameResolvedMsg       - DM display-name resolved (im.open
-//                             roundtrip): patch the sidebar entry
-//                             and re-render.
-//   UserResolvedMsg         - per-user display-name resolved:
-//                             patch any in-history references in
-//                             both messages pane and thread panel.
-//   UserExternalMsg         - per-user external/internal flag
-//                             resolved: update the cache + re-push
-//                             SetUserNames so styling refreshes.
-//   ReadStateChangedMsg     - persistent read-state changed in the
-//                             cache: refresh sidebar + workspace rail.
-//   CustomEmojisLoadedMsg   - per-workspace emoji list arrived.
-//                             Apply only to the active workspace.
+//	WorkspaceReadyMsg       - one of the configured workspaces
+//	                          finished its initial connect. If
+//	                          InitialActive (claimed exactly once),
+//	                          activate it: apply theme, push
+//	                          channels/users/emoji, open the first
+//	                          channel. Always fires an initial
+//	                          threads-list fetch.
+//	WorkspaceSwitchedMsg    - user picked a different workspace.
+//	                          Tear down per-workspace transient
+//	                          state (threads view, edit, selection,
+//	                          compose draft), push new channels/users/
+//	                          emoji, apply theme, restore the last
+//	                          channel viewed for this workspace.
+//	ConversationOpenedMsg   - WS event: a DM/MPIM just opened.
+//	                          Upsert into the active sidebar.
+//	SectionsRefreshedMsg    - cache notice: sidebar sections were
+//	                          reorganized. Re-push channel items
+//	                          for the active workspace.
+//	DMNameResolvedMsg       - DM display-name resolved (im.open
+//	                          roundtrip): patch the sidebar entry
+//	                          and re-render.
+//	UserResolvedMsg         - per-user display-name resolved:
+//	                          patch any in-history references in
+//	                          both messages pane and thread panel.
+//	UserExternalMsg         - per-user external/internal flag
+//	                          resolved: update the cache + re-push
+//	                          SetUserNames so styling refreshes.
+//	ReadStateChangedMsg     - persistent read-state changed in the
+//	                          cache: refresh sidebar + workspace rail.
+//	CustomEmojisLoadedMsg   - per-workspace emoji list arrived.
+//	                          Apply only to the active workspace.
 //
 // Free reducer (not controller-absorbed): these arms cooperate on
 // the sidebar, messagepane, threadPanel, statusbar, channelFinder,
@@ -193,7 +193,10 @@ func reduceWorkspaceReady(a *App, m WorkspaceReadyMsg) tea.Cmd {
 		a.SetExternalUsers(m.ExternalUsers)
 		a.SetUserNames(m.UserNames)
 		a.SetCustomEmoji(m.CustomEmoji)
-		a.currentUserID = m.UserID
+		// Route through the setter so messagepane/threadPanel also learn
+		// the current user — production never calls SetCurrentUserID
+		// otherwise, which would leave live self-reactions unstyled.
+		a.SetCurrentUserID(m.UserID)
 		a.activeTeamID = m.TeamID
 		pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
 		a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
@@ -267,7 +270,9 @@ func reduceWorkspaceSwitched(a *App, m WorkspaceSwitchedMsg) tea.Cmd {
 	a.SetExternalUsers(m.ExternalUsers)
 	a.SetUserNames(m.UserNames)
 	a.SetCustomEmoji(m.CustomEmoji)
-	a.currentUserID = m.UserID
+	// Route through the setter so messagepane/threadPanel also learn the
+	// current user (see WorkspaceReadyMsg above).
+	a.SetCurrentUserID(m.UserID)
 	a.activeTeamID = m.TeamID
 	pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
 	a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
