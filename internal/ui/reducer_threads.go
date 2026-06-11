@@ -140,6 +140,11 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		_ = m
 		a.view = ViewThreads
 		a.sidebar.SetThreadsActive(true)
+		// Focus the threads list (it renders in the messages slot) even
+		// under keep_focus_on_list: here the threads list IS the list you
+		// browse, so landing on it is the on-list behavior. The flag
+		// instead governs Enter-to-open *within* a list (see handleEnter
+		// and openThreadPanel), not which list you're browsing.
 		a.focusedPanel = PanelMessages
 		var batch []tea.Cmd
 		if a.activeTeamID != "" {
