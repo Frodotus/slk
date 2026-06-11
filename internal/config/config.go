@@ -43,6 +43,22 @@ type ExternalCommand struct {
 	Interactive bool `toml:"interactive"`
 	// Confirm prompts before running.
 	Confirm bool `toml:"confirm"`
+
+	// Auto-trigger fields. When any is set, the command also runs
+	// automatically (async, in the background) on incoming messages that
+	// match — no picker. A command fires if ANY of its triggers match,
+	// and never on your own messages. These are independent of the manual
+	// picker (a command can be both manual and auto).
+	OnMention  bool     `toml:"on_mention"`  // fires when you are @-mentioned
+	Match      string   `toml:"match"`       // case-insensitive substring of the text
+	MatchRegex string   `toml:"match_regex"` // RE2 regular expression over the text
+	Channels   []string `toml:"channels"`    // optional: only these channel names
+}
+
+// HasAutoTrigger reports whether the command runs automatically on
+// matching messages (vs. picker-only).
+func (c ExternalCommand) HasAutoTrigger() bool {
+	return c.OnMention || c.Match != "" || c.MatchRegex != ""
 }
 
 // SectionDef defines a sidebar section with channel name patterns.

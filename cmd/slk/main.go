@@ -22,6 +22,7 @@ import (
 	"github.com/gammons/slk/internal/config"
 	"github.com/gammons/slk/internal/debuglog"
 	emojiwidth "github.com/gammons/slk/internal/emoji"
+	"github.com/gammons/slk/internal/extcmd"
 	"github.com/gammons/slk/internal/ids"
 	imgpkg "github.com/gammons/slk/internal/image"
 	"github.com/gammons/slk/internal/notify"
@@ -1627,6 +1628,10 @@ func run() error {
 
 			// Start WebSocket for this workspace
 			teamID := wctx.TeamID
+			autoCmds, autoErrs := extcmd.CompileAuto(cfg.ExternalCommands)
+			for _, e := range autoErrs {
+				debuglog.General("external command: %v", e)
+			}
 			handler := &rtmEventHandler{
 				program:         p,
 				userNames:       wctx.UserNames,
@@ -1644,6 +1649,7 @@ func run() error {
 				cfg:             cfg,
 				wsCtx:           wctx,
 				backfillGate:    dedupeGate{window: 30 * time.Second},
+				autoCommands:    autoCmds,
 			}
 			wctx.RTMHandler = handler
 			wctx.ConnMgr = slackclient.NewConnectionManager(wctx.Client, handler)
@@ -3126,6 +3132,10 @@ type rtmEventHandler struct {
 	// backfill passes. Per-handler so each workspace has its own gate.
 	// Initialized at construction with window = 30 * time.Second.
 	backfillGate dedupeGate
+
+	// autoCommands are external commands with auto-triggers, evaluated
+	// against each incoming live message in OnMessage.
+	autoCommands []extcmd.AutoCommand
 }
 
 func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subtype string, edited bool, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment, botID, username string) {
@@ -3217,6 +3227,19 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 		}
 	}
 
+	// Auto-run external commands whose trigger matches this message.
+	// Fires once, on genuinely new incoming messages (not edits, not your
+	// own), across all workspaces/channels.
+	if len(h.autoCommands) > 0 && !edited && userID != h.currentUserID {
+		mentioned := h.currentUserID != "" && strings.Contains(text, "<@"+h.currentUserID+">")
+		chName := h.channelNames[channelID]
+		for _, ac := range h.autoCommands {
+			if ac.Triggered(text, mentioned, chName) {
+				h.runAutoCommand(ac.Cmd, text, userID, ts, channelID, chName)
+			}
+		}
+	}
+
 	// Read-state: mark the channel has_unread=true when a message
 	// arrives in a channel the user is NOT actively viewing. Mirrors
 	// Slack's channel-unread semantics — non-broadcast thread replies
@@ -3297,6 +3320,36 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 			},
 		})
 	}
+}
+
+// runAutoCommand executes an auto-triggered external command in the
+// background (never interactive). Silent on success; a toast surfaces
+// failures.
+func (h *rtmEventHandler) runAutoCommand(c config.ExternalCommand, text, userID, ts, channelID, chName string) {
+	name := h.userNames[userID]
+	if name == "" {
+		name = userID
+	}
+	mctx := extcmd.Context{
+		Text:        text,
+		UserName:    name,
+		UserID:      userID,
+		TS:          ts,
+		ChannelID:   channelID,
+		ChannelName: chName,
+	}
+	cmdName := c.Name
+	debuglog.General("auto external command %q triggered (channel=%s ts=%s)", cmdName, channelID, ts)
+	go func() {
+		res := extcmd.Run(c, mctx)
+		if res.Err != nil && h.program != nil {
+			detail := extcmd.FirstLine(res.Stderr)
+			if detail == "" {
+				detail = fmt.Sprintf("exit %d", res.ExitCode)
+			}
+			h.program.Send(ui.ToastMsg{Text: fmt.Sprintf("✗ auto %q failed: %s", cmdName, detail)})
+		}
+	}()
 }
 
 func (h *rtmEventHandler) OnMessageDeleted(channelID, ts string) {
