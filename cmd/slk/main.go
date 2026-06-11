@@ -1840,6 +1840,10 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 	// UI goroutine via Model.PatchUserName (the single safe writer
 	// for that shared map). p may be nil in tests, in which case
 	// the resolver's send callback is a no-op.
+	identityTTL := time.Duration(cfg.Cache.IdentityTTLDays) * 24 * time.Hour
+	if identityTTL < 0 {
+		identityTTL = 0 // negative is nonsensical; treat as "never refresh" (= 0)
+	}
 	wctx.UserResolver = newUserResolver(
 		wctx.TeamID,
 		wctx.Client,
@@ -1850,7 +1854,7 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 				p.Send(msg)
 			}
 		},
-		time.Duration(cfg.Cache.IdentityTTLDays)*24*time.Hour,
+		identityTTL,
 	)
 
 	// Per-workspace channel-membership manager. *slackclient.Client
