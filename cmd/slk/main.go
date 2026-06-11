@@ -83,10 +83,21 @@ func (a sectionsProviderAdapter) OrderedSlackSections() []sidebar.SectionMeta {
 	secs := a.store.OrderedSections()
 	out := make([]sidebar.SectionMeta, 0, len(secs))
 	for _, s := range secs {
+		name, emoji := s.Name, s.Emoji
+		if s.Type == "stars" {
+			// Slack's system "Starred" section often arrives with an
+			// empty name/emoji; supply the familiar label + ⭐.
+			if name == "" {
+				name = "Starred"
+			}
+			if emoji == "" {
+				emoji = "star"
+			}
+		}
 		out = append(out, sidebar.SectionMeta{
 			ID:    s.ID,
-			Name:  s.Name,
-			Emoji: s.Emoji,
+			Name:  name,
+			Emoji: emoji,
 			Type:  s.Type,
 		})
 	}

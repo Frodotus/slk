@@ -164,6 +164,19 @@ func (s *SectionStore) OrderedSections() []*slk.SidebarSection {
 		}
 		cur = s.sectionsByID[cur.Next]
 	}
+
+	// Pin the Starred (stars) section to the top, matching the official
+	// client which always shows Starred first regardless of where Slack's
+	// section linked-list places it.
+	for i, sec := range out {
+		if sec.Type == "stars" {
+			if i > 0 {
+				out = append(out[:i], out[i+1:]...)
+				out = append([]*slk.SidebarSection{sec}, out...)
+			}
+			break
+		}
+	}
 	return out
 }
 
@@ -179,10 +192,13 @@ func includeInSidebar(sec *slk.SidebarSection) bool {
 	switch sec.Type {
 	case "standard", "channels", "direct_messages":
 		return true
-	case "recent_apps":
+	case "recent_apps", "stars":
+		// recent_apps: slk has its own Apps logic for the empty case.
+		// stars: the user's Slack-starred conversations (the "Starred"
+		// section). Both render only when non-empty.
 		return len(sec.ChannelIDs) > 0
 	default:
-		// stars, slack_connect, salesforce_records, agents, anything new.
+		// slack_connect, salesforce_records, agents, anything new.
 		return false
 	}
 }

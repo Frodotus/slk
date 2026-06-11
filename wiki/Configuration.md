@@ -207,13 +207,17 @@ rest of the `[sections.*]` block.
 ### v1 limitations of Slack-native sections
 
 v1 is read-only — section editing still happens in the official client; slk
-reflects the results. Sections of type `stars`, `slack_connect`,
-`salesforce_records`, and `agents` are hidden (matching the official
-client's filtering). Sections with more than 10 channels may be returned
-only partially by Slack's API on initial load; the missing channels
-temporarily fall into the catch-all bucket and migrate into their correct
-section as WebSocket events fire or the workspace reconnects. A debug-log
-warning identifies which sections were truncated.
+reflects the results. Your **Starred** conversations (Slack's `stars`
+section) are surfaced read-only and pinned to the top of the sidebar: star
+or unstar in the official client and slk reflects it live. Other system
+sections (`slack_connect`, `salesforce_records`, `agents`) remain hidden.
+Because this comes from Slack's section data, the Starred section only
+appears in Slack-native mode (`use_slack_sections = true`, the default); it
+is not available in glob-section mode. Sections with more than 10 channels
+may be returned only partially by Slack's API on initial load; the missing
+channels temporarily fall into the catch-all bucket and migrate into their
+correct section as WebSocket events fire or the workspace reconnects. A
+debug-log warning identifies which sections were truncated.
 
 ## Workspace order
 
