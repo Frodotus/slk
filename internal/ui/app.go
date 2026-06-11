@@ -1370,9 +1370,10 @@ func (a *App) handleEnter() tea.Cmd {
 	// messagepane.SelectedMessage() and opens whatever was highlighted
 	// in the underlying channel. Enter also shifts keyboard focus to
 	// the thread pane (mirroring the channel-pane Enter semantics:
-	// "enter this thread to interact with it"), distinguishing it
-	// from the j/k navigation which preserves PanelMessages focus so
-	// the user can keep walking the list.
+	// "enter this thread to interact with it") — unless
+	// keep_focus_on_list is set, which keeps focus on the threads list.
+	// Either way this is distinct from j/k navigation, which always
+	// preserves PanelMessages focus so the user can keep walking the list.
 	if a.focusedPanel == PanelMessages && a.view == ViewThreads {
 		if _, ok := a.threadsView.SelectedSummary(); !ok {
 			return nil
@@ -1381,7 +1382,8 @@ func (a *App) handleEnter() tea.Cmd {
 		// otherwise dedup (because j/k or activation already loaded
 		// this thread): the user explicitly asked to enter it. We
 		// reset the dedup keys so the helper runs its full open
-		// path, then re-set focus to the thread pane.
+		// path, then move focus to the thread pane (unless
+		// keep_focus_on_list keeps it on the threads list).
 		a.lastOpenedChannelID = ""
 		a.lastOpenedThreadTS = ""
 		cmd := a.openSelectedThreadCmd(false)

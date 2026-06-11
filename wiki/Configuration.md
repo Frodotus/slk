@@ -9,9 +9,9 @@ Config lives at `~/.config/slk/config.toml`.
 default_workspace = "work"      # the slug, not the team ID
 use_slack_sections = true       # use real Slack sidebar sections (default).
                                 # set false to use [sections.*] globs instead.
-keep_focus_on_list = false      # keep keyboard focus on the list when you
-                                # select a channel / open a thread (default
-                                # false). see "Browsing without losing focus".
+keep_focus_on_list = false      # keep focus on the list when you select a
+                                # channel / open a thread (default false).
+                                # See "Browsing without losing focus" below.
 
 [appearance]
 theme = "dracula"
