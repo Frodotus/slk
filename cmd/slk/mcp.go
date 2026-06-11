@@ -14,8 +14,10 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/gammons/slk/internal/config"
+	imgpkg "github.com/gammons/slk/internal/image"
 	slkmcp "github.com/gammons/slk/internal/mcp"
 	"github.com/gammons/slk/internal/ui"
+	"github.com/gammons/slk/internal/ui/messages"
 )
 
 // mcpSocketPath resolves the MCP socket path from config (override) or the
@@ -30,13 +32,16 @@ func mcpSocketPath(cfg config.Config) string {
 // startMCPServer opens the unix socket the `slk mcp` subprocess connects to,
 // and wires the App to publish snapshots into it. Returns the listener to
 // close on shutdown. Called from the TUI path only when [mcp] enabled.
-func startMCPServer(cfg config.Config, app *ui.App, p *tea.Program) (io.Closer, error) {
+func startMCPServer(cfg config.Config, app *ui.App, p *tea.Program, imageCache *imgpkg.Cache) (io.Closer, error) {
 	socket := mcpSocketPath(cfg)
 	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
 		return nil, err
 	}
 	state := slkmcp.NewState()
 	app.SetMCPState(state)
+	app.SetMCPImageResolver(func(m messages.MessageItem) []string {
+		return cachedMessageImagePaths(m, imageCache)
+	})
 	return slkmcp.Serve(socket, &mcpBridge{state: state, prog: p})
 }
 

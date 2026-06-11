@@ -27,6 +27,11 @@ type Message struct {
 	User      string     `json:"user"`
 	Text      string     `json:"text"`
 	Reactions []Reaction `json:"reactions,omitempty"`
+	// Images holds on-disk paths of the message's already-cached images
+	// (the same ones slk has rendered). An MCP client can read these to
+	// transcribe / describe screenshots. Empty when there are no images or
+	// none are cached yet.
+	Images []string `json:"images,omitempty"`
 }
 
 // Channel identifies the active channel.

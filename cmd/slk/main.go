@@ -1756,7 +1756,7 @@ func run() error {
 	// MCP server: expose the current focus + a draft action to a local MCP
 	// client (e.g. Claude Code via `slk mcp`). Off unless [mcp] enabled.
 	if cfg.MCP.Enabled {
-		if closer, err := startMCPServer(cfg, app, p); err != nil {
+		if closer, err := startMCPServer(cfg, app, p, imageCache); err != nil {
 			debuglog.General("mcp: failed to start server: %v", err)
 		} else if closer != nil {
 			defer closer.Close()

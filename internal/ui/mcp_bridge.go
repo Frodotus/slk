@@ -49,13 +49,13 @@ func (a *App) buildSnapshot() mcp.Snapshot {
 		snap.Channel = &mcp.Channel{ID: a.activeChannelID, Name: name, Type: ctype}
 	}
 	if sel, ok := a.messagepane.SelectedMessage(); ok {
-		snap.SelectedMessage = toMCPMessage(sel)
+		snap.SelectedMessage = a.toMCPMessage(sel)
 	}
 	if a.threadVisible && a.threadPanel.ThreadTS() != "" {
 		snap.Thread = mcp.Thread{
 			Open:    true,
-			Parent:  toMCPMessage(a.threadPanel.ParentMsg()),
-			Replies: toMCPMessages(a.threadPanel.Replies()),
+			Parent:  a.toMCPMessage(a.threadPanel.ParentMsg()),
+			Replies: a.toMCPMessages(a.threadPanel.Replies()),
 		}
 	}
 	msgs := a.messagepane.Messages()
@@ -63,8 +63,15 @@ func (a *App) buildSnapshot() mcp.Snapshot {
 	if len(msgs) > recentN {
 		msgs = msgs[len(msgs)-recentN:]
 	}
-	snap.RecentMessages = toMCPMessages(msgs)
+	snap.RecentMessages = a.toMCPMessages(msgs)
 	return snap
+}
+
+// SetMCPImageResolver injects the function mapping a message to on-disk
+// paths of its cached images, so the snapshot can carry them for MCP
+// clients to read. Nil = no image paths.
+func (a *App) SetMCPImageResolver(fn func(messages.MessageItem) []string) {
+	a.mcpImageResolver = fn
 }
 
 // setComposeDraft fills the active composer with the draft and enters
@@ -102,7 +109,7 @@ func (a *App) channelNameType(channelID string) (name, ctype string) {
 	return "", ""
 }
 
-func toMCPMessage(m messages.MessageItem) *mcp.Message {
+func (a *App) toMCPMessage(m messages.MessageItem) *mcp.Message {
 	if m.TS == "" {
 		return nil
 	}
@@ -110,13 +117,16 @@ func toMCPMessage(m messages.MessageItem) *mcp.Message {
 	for _, r := range m.Reactions {
 		out.Reactions = append(out.Reactions, mcp.Reaction{Emoji: r.Emoji, Count: r.Count})
 	}
+	if a.mcpImageResolver != nil {
+		out.Images = a.mcpImageResolver(m)
+	}
 	return out
 }
 
-func toMCPMessages(items []messages.MessageItem) []mcp.Message {
+func (a *App) toMCPMessages(items []messages.MessageItem) []mcp.Message {
 	out := make([]mcp.Message, 0, len(items))
 	for _, it := range items {
-		if m := toMCPMessage(it); m != nil {
+		if m := a.toMCPMessage(it); m != nil {
 			out = append(out, *m)
 		}
 	}

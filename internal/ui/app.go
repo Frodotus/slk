@@ -266,6 +266,9 @@ type App struct {
 	// mcpState, when set (via SetMCPState), receives a published snapshot
 	// of the current focus at the end of every Update for the MCP server.
 	mcpState *mcp.State
+	// mcpImageResolver maps a message to on-disk paths of its cached images
+	// (injected by main, which owns the image cache).
+	mcpImageResolver func(messages.MessageItem) []string
 
 	// pendingLinkNav tracks an in-flight permalink navigation: the
 	// channel was (or is being) opened and the message-select /
