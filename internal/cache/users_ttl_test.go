@@ -14,6 +14,7 @@ func TestUpsertUserStampsUpdatedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer db.Close()
 	if err := db.UpsertWorkspace(Workspace{ID: "T1", Name: "team"}); err != nil {
 		t.Fatalf("UpsertWorkspace: %v", err)
 	}
@@ -34,7 +35,10 @@ func TestUpsertUserStampsUpdatedAt(t *testing.T) {
 	if err := db.UpsertUser(User{ID: "U2", WorkspaceID: "T1", Name: "bob", UpdatedAt: 12345}); err != nil {
 		t.Fatalf("UpsertUser explicit: %v", err)
 	}
-	u2, _ := db.GetUser("U2")
+	u2, err := db.GetUser("U2")
+	if err != nil {
+		t.Fatalf("GetUser U2: %v", err)
+	}
 	if u2.UpdatedAt != 12345 {
 		t.Errorf("explicit UpdatedAt overwritten: got %d, want 12345", u2.UpdatedAt)
 	}
