@@ -21,6 +21,7 @@ const (
 	ModeLinkPicker
 	ModeExtCmd
 	ModeExtCmdOutput
+	ModeWorkspaceSearch
 )
 
 // IsModalOverlay reports whether the mode is a full-screen modal
@@ -45,7 +46,8 @@ func (m Mode) IsModalOverlay() bool {
 		ModeReactionsView,
 		ModeLinkPicker,
 		ModeExtCmd,
-		ModeExtCmdOutput:
+		ModeExtCmdOutput,
+		ModeWorkspaceSearch:
 		return true
 	default:
 		return false
@@ -88,6 +90,8 @@ func (m Mode) String() string {
 		return "COMMAND"
 	case ModeExtCmdOutput:
 		return "OUTPUT"
+	case ModeWorkspaceSearch:
+		return "WS-SEARCH"
 	default:
 		return "UNKNOWN"
 	}
