@@ -1158,8 +1158,14 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 						// Idempotent: only decrement if userID was actually
 						// present (a duplicate WS echo must not under-count).
 						newIDs := RemoveUserID(r.UserIDs, userID)
-						if len(newIDs) == len(r.UserIDs) {
-							break // userID wasn't reacting; nothing to do
+						if len(newIDs) == len(r.UserIDs) && r.Count <= len(r.UserIDs) {
+							// userID isn't among the listed reactors and the
+							// list isn't truncated, so this is a duplicate echo
+							// of a removal we already applied — skip to avoid
+							// under-counting. When Count > len(UserIDs), Slack
+							// truncated the reactor list for a popular reaction;
+							// the removal is real, so fall through and decrement.
+							break
 						}
 						r.UserIDs = newIDs
 						r.Count--

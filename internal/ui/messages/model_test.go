@@ -1405,6 +1405,33 @@ func TestUpdateReactionMaintainsUserIDs(t *testing.T) {
 	}
 }
 
+// TestUpdateReactionTruncatedRemoval covers the PR #68 review follow-up:
+// Slack truncates reactions[].users for popular reactions, so a removal of a
+// user absent from the (truncated) list must still decrement when Count >
+// len(UserIDs) — while a duplicate echo on a non-truncated list must not.
+func TestUpdateReactionTruncatedRemoval(t *testing.T) {
+	// Truncated reactor list: Count(5) > len(UserIDs)(2).
+	m := New([]MessageItem{{TS: "100.0", Reactions: []ReactionItem{
+		{Emoji: "tada", Count: 5, UserIDs: []string{"A", "B"}},
+	}}}, "general")
+	m.UpdateReaction("100.0", "tada", "Z", true) // Z not listed, but list is truncated
+	msg, _ := m.SelectedMessage()
+	if got := msg.Reactions[0].Count; got != 4 {
+		t.Errorf("truncated removal must decrement: Count=%d, want 4", got)
+	}
+
+	// Non-truncated list: Count(2) == len(UserIDs)(2). A removal of an
+	// un-listed user is a duplicate echo — must NOT under-count.
+	m2 := New([]MessageItem{{TS: "200.0", Reactions: []ReactionItem{
+		{Emoji: "tada", Count: 2, UserIDs: []string{"A", "B"}},
+	}}}, "general")
+	m2.UpdateReaction("200.0", "tada", "Z", true)
+	msg2, _ := m2.SelectedMessage()
+	if got := msg2.Reactions[0].Count; got != 2 {
+		t.Errorf("duplicate-echo removal must not under-count: Count=%d, want 2", got)
+	}
+}
+
 // TestUpdateReactionIdempotentAndHasReacted covers the live-reaction fix:
 // an optimistic self-update plus its WS echo must collapse to one count,
 // reactions made by the current user from another device still apply, and
