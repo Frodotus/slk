@@ -509,6 +509,12 @@ func main() {
 				os.Exit(1)
 			}
 			os.Exit(0)
+		case "--demo":
+			if err := runDemo(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
 		}
 	}
 

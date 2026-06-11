@@ -1715,6 +1715,21 @@ func (a *App) SetInitialLastReadTS(ts string) {
 }
 
 // Setters for external use (wiring services)
+// SetSectionsProvider injects a Slack-native sidebar sections data source.
+// Normally wired from WorkspaceReadyMsg; exposed directly for the --demo
+// scene seeder.
+func (a *App) SetSectionsProvider(p sidebar.SectionsProvider) {
+	a.sidebar.SetSectionsProvider(p)
+}
+
+// ShowThread opens the thread panel on the given parent with the given
+// replies (no fetch). Used by the --demo seeder to render an open thread.
+func (a *App) ShowThread(parent messages.MessageItem, replies []messages.MessageItem, channelID, threadTS string) {
+	a.threadVisible = true
+	a.statusbar.SetInThread(true)
+	a.threadPanel.SetThread(parent, replies, channelID, threadTS)
+}
+
 func (a *App) SetWorkspaces(items []workspace.WorkspaceItem) {
 	a.workspaceRail.SetItems(items)
 	a.workspaceRail.RefreshUnreads()

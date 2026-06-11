@@ -84,6 +84,11 @@ type Fetcher struct {
 	// appear hung for many seconds.
 	decoded sync.Map // string("<key>|<wxh>") -> image.Image
 
+	// local holds pre-decoded images served for any cache key beginning
+	// with the registered file ID, bypassing fetch/disk. Populated by
+	// SetLocalImage for `slk --demo`; empty otherwise.
+	local sync.Map // fileID string -> image.Image
+
 	// prerendered caches the result of RenderImage(proto, decoded, cellTarget)
 	// per (key, cellTarget, proto). The fetch goroutine populates this so
 	// the bubbletea Update goroutine never runs sixel encoding, halfblock
@@ -643,6 +648,9 @@ func (f *Fetcher) Bytes(key string) ([]byte, error) {
 // acceptable -- image-cache evictions are rare and the rendered
 // content is content-addressable so a stale render is still correct.
 func (f *Fetcher) Cached(key string, target image.Point) (image.Image, bool) {
+	if img, ok := f.localImage(key); ok {
+		return img, true
+	}
 	memoKey := decodedMemoKey(key, target)
 	if v, ok := f.decoded.Load(memoKey); ok {
 		if img, ok := v.(image.Image); ok {
@@ -650,6 +658,28 @@ func (f *Fetcher) Cached(key string, target image.Point) (image.Image, bool) {
 		}
 	}
 	return nil, false
+}
+
+// SetLocalImage registers a pre-decoded image served for any cache key
+// of the form "<fileID>-<suffix>" (or exactly fileID), bypassing the
+// fetch/decode/disk path. Used by `slk --demo` to inject a generated
+// inline image without a network round-trip.
+func (f *Fetcher) SetLocalImage(fileID string, img image.Image) {
+	f.local.Store(fileID, img)
+}
+
+// localImage returns a registered local image whose file ID prefixes key.
+func (f *Fetcher) localImage(key string) (image.Image, bool) {
+	var found image.Image
+	f.local.Range(func(k, v any) bool {
+		fileID, _ := k.(string)
+		if key == fileID || strings.HasPrefix(key, fileID+"-") {
+			found, _ = v.(image.Image)
+			return false
+		}
+		return true
+	})
+	return found, found != nil
 }
 
 func decodedMemoKey(key string, target image.Point) string {

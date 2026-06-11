@@ -207,6 +207,18 @@ func (c *Cache) Get(userID string) string {
 	return c.renders[userID]
 }
 
+// SetLocalAvatar renders a pre-decoded image as userID's avatar and caches
+// the result, bypassing the fetch path. Used by `slk --demo` to inject
+// generated avatars. On the kitty path the upload escape fires during this
+// call, so invoke it from the render loop (e.g. lazily from the AvatarFunc)
+// rather than before the program starts.
+func (c *Cache) SetLocalAvatar(userID string, img image.Image) {
+	rendered := c.renderAvatar(userID, img)
+	c.mu.Lock()
+	c.renders[userID] = rendered
+	c.mu.Unlock()
+}
+
 // Invalidate drops the cached render for userID and clears the dedup
 // gate and the underlying fetcher entry, so the next Preload re-downloads
 // and re-renders the avatar. Used by the identity-TTL refresh when a
