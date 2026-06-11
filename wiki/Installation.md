@@ -55,12 +55,6 @@ sudo mv slk /usr/local/bin/
 
 Download the `windows_x86_64.zip` from the [latest release](https://github.com/gammons/slk/releases/latest), extract `slk.exe`, and add it to your `PATH`.
 
-## Go
-
-```bash
-go install github.com/gammons/slk/cmd/slk@latest
-```
-
 ## Build from source
 
 Requires Go 1.22+.

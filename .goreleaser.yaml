@@ -82,9 +82,9 @@ changelog:
 nfpms:
   - id: slk
     package_name: slk
-    vendor: Grant Ammons
-    homepage: https://github.com/gammons/slk
-    maintainer: Grant Ammons <grant@grant.dev>
+    vendor: Sudoers
+    homepage: https://github.com/Frodotus/slk
+    maintainer: Toni Leino <toni@leino.net>
     description: |-
       A blazingly fast Slack TUI.
       Keyboard-driven, beautifully themed terminal client for Slack.
@@ -103,7 +103,7 @@ nfpms:
 
 release:
   github:
-    owner: gammons
+    owner: Frodotus
     name: slk
   draft: false
   prerelease: auto
@@ -121,16 +121,15 @@ release:
     - **Fedora/RHEL:** `sudo rpm -i slk_*.rpm`
     - **Alpine:** `sudo apk add --allow-untrusted slk_*.apk`
     - **Windows:** download the `.zip`, extract `slk.exe`, add to `PATH`
-    - **Go:** `go install github.com/gammons/slk/cmd/slk@{{ .Tag }}`
 
     Verify downloads with `checksums.txt`.
 
 # Homebrew tap.
 #
-# Publishes a formula to gammons/homebrew-tap on every non-prerelease
+# Publishes a formula to Frodotus/homebrew-tap on every non-prerelease
 # tag. Users install via:
 #
-#     brew install gammons/tap/slk
+#     brew install Frodotus/tap/slk
 #
 # The token is a fine-grained PAT scoped to the homebrew-tap repo with
 # contents:write, stored as HOMEBREW_TAP_GITHUB_TOKEN in this repo's
@@ -138,16 +137,16 @@ release:
 brews:
   - name: slk
     repository:
-      owner: gammons
+      owner: Frodotus
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     commit_author:
       name: goreleaser
-      email: goreleaser@gammons.dev
+      email: toni@leino.net
     commit_msg_template: "slk: brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    homepage: https://github.com/gammons/slk
+    homepage: https://github.com/Frodotus/slk
     description: A blazingly fast, keyboard-driven Slack TUI
     license: MIT
     # Skip the prerelease tags goreleaser auto-flags so the tap only

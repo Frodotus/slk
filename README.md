@@ -52,12 +52,6 @@ curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSIO
 sudo mv slk /usr/local/bin/
 ```
 
-**Go:**
-
-```bash
-go install -ldflags="-s -w" -trimpath github.com/gammons/slk/cmd/slk@latest
-```
-
 For `.deb` / `.rpm` / `.apk` packages, Windows, build-from-source, and checksums, see the [Installation wiki page](https://github.com/gammons/slk/wiki/Installation).
 
 ## Setup
@@ -204,4 +198,4 @@ slk talks to Slack via the same internal browser protocol the official web clien
 
 ## License
 
-[MIT](LICENSE) © Grant Ammons
+Licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

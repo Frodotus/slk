@@ -4,19 +4,8 @@
 // string in so this package stays free of build-time coupling.
 package version
 
-// osc8 wraps url as a clickable OSC-8 hyperlink whose visible label is
-// the URL itself. Terminals without OSC-8 support render the label as
-// plain text.
-func osc8(url string) string {
-	return "\x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\"
-}
-
-// ModalFooter returns the single attribution line shown at the bottom
-// of the TUI help modal, e.g.:
-//
-//	slk dev - Made with ❤️ by Grant Ammons (https://grant.dev)
-//
-// The URL is OSC-8 wrapped so supporting terminals make it clickable.
+// ModalFooter returns the single line shown at the bottom of the TUI
+// help modal — just the running version.
 func ModalFooter(version string) string {
-	return "slk " + version + " - Made with \u2764\ufe0f by Grant Ammons (" + osc8("https://grant.dev") + ")"
+	return "slk " + version
 }
