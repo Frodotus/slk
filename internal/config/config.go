@@ -25,6 +25,17 @@ type Config struct {
 	// ExternalCommands are user-defined commands runnable on the selected
 	// message via the command picker (default hotkey: x).
 	ExternalCommands []ExternalCommand `toml:"external_commands"`
+	MCP              MCPConfig         `toml:"mcp"`
+}
+
+// MCPConfig controls slk's MCP server, which exposes the current focus
+// (selected message / open thread / channel) to a local MCP client and
+// lets it draft into the compose box. slk never sends. Off by default.
+type MCPConfig struct {
+	Enabled bool `toml:"enabled"`
+	// SocketPath overrides the default unix socket location
+	// ($XDG_DATA_HOME/slk/mcp.sock). Usually left unset.
+	SocketPath string `toml:"socket_path"`
 }
 
 // ExternalCommand defines a program runnable against the selected message.

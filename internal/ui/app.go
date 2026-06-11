@@ -25,6 +25,7 @@ import (
 	"github.com/gammons/slk/internal/export"
 	"github.com/gammons/slk/internal/ids"
 	imgpkg "github.com/gammons/slk/internal/image"
+	"github.com/gammons/slk/internal/mcp"
 	"github.com/gammons/slk/internal/slackurl"
 	"github.com/gammons/slk/internal/ui/channelfinder"
 	"github.com/gammons/slk/internal/ui/channelpicker"
@@ -262,6 +263,10 @@ type App struct {
 	// router to match permalink hosts against the active workspace.
 	workspaceDomains map[string]string
 
+	// mcpState, when set (via SetMCPState), receives a published snapshot
+	// of the current focus at the end of every Update for the MCP server.
+	mcpState *mcp.State
+
 	// pendingLinkNav tracks an in-flight permalink navigation: the
 	// channel was (or is being) opened and the message-select /
 	// thread-open completes when that channel's messages land. See
@@ -486,6 +491,10 @@ func (a *App) Init() tea.Cmd {
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Republish the MCP snapshot after this Update settles (no-op when the
+	// MCP server is disabled). Reads final App state via the pointer.
+	defer a.publishMCP()
+
 	var cmds []tea.Cmd
 
 	// Phase 4 reducer chain (extension point — see internal/ui/reducers.go).
@@ -505,6 +514,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.bootstrap,
 		reduceReactions,
 		reduceExtCmd,
+		reduceMCP,
 		reduceThreads,
 		reduceSend,
 		reduceChannels,
