@@ -81,9 +81,13 @@ func (m *Model) Open() {
 
 // SetHighlightTerms sets (or clears, with nil/empty) the folded terms
 // (text.Fold) whose word-prefix occurrences get highlighted in snippet
-// lines. The caller derives them from the submitted query; the slice
-// is cloned so later caller mutation can't alias modal state.
+// lines. The caller derives them from the submitted query and installs
+// them alongside SetResults; the slice is cloned so later caller
+// mutation can't alias modal state.
 func (m *Model) SetHighlightTerms(terms []string) {
+	if m.st != stateLoading {
+		return // defense against stale async injection; the caller also guards by query
+	}
 	m.highlightTerms = slices.Clone(terms)
 }
 
@@ -488,22 +492,25 @@ func (m Model) resultRows(innerWidth, termHeight int) []string {
 	thumbStyle := lipgloss.NewStyle().Background(bg).Foreground(styles.Primary)
 	trackStyle := lipgloss.NewStyle().Background(bg).Foreground(styles.Border)
 
-	// Highlight open/close SGRs, derived once per render via the
-	// sentinel-split pattern (same guard as the messages pane's call
-	// site). The close appends the modal bg/fg restore so the
-	// highlighter's reset can't bleed terminal-default colors before
-	// renderBox's ReapplyBgAfterResets pass.
+	// Highlight open/close SGRs, derived once per render (same guard
+	// as the messages pane's call site). The close carries the theme
+	// bg/fg restore so the highlighter's reset can't bleed
+	// terminal-default colors before renderBox's ReapplyBgAfterResets
+	// pass.
 	var hlStart, hlEnd string
 	if len(m.highlightTerms) > 0 {
-		if parts := strings.SplitN(styles.SearchHighlightStyle().Render("\x00"), "\x00", 2); len(parts) == 2 && parts[0] != "" {
-			hlStart = parts[0]
-			hlEnd = parts[1] + messages.BgANSI() + messages.FgANSI()
+		if start, end, ok := messages.SearchHighlightSGR(); ok {
+			hlStart, hlEnd = start, end
 		}
 	}
 	// highlight wraps term matches in a styled snippet span. Applied
 	// AFTER wrapping/truncation (the split math above stays plain-text;
 	// a match split across the two snippet lines simply doesn't light
-	// up) and AFTER textStyle.Render, so the selected row's
+	// up, and conversely a word tail that starts line 3 begins at what
+	// looks like a fresh word start, so a term can false-positive
+	// mid-word there — e.g. term "deploy" lighting up the "deployment"
+	// tail of a split "redeployment") and AFTER textStyle.Render, so
+	// the selected row's
 	// Primary/Bold SGR is active at the match and gets re-applied by
 	// the highlighter after each close. Padding happens later and is
 	// lipgloss.Width-based (ANSI-aware), so the zero-width SGRs leave

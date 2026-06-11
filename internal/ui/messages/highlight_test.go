@@ -128,9 +128,9 @@ func TestHighlightSearchTerms_NonCSIEscape(t *testing.T) {
 func TestSearchHighlightSGR_EndRestoresThemeColors(t *testing.T) {
 	styles.Apply("dark", config.Theme{})
 	t.Cleanup(func() { styles.Apply("dark", config.Theme{}) })
-	start, end, ok := searchHighlightSGR()
+	start, end, ok := SearchHighlightSGR()
 	if !ok {
-		t.Fatal("searchHighlightSGR returned !ok")
+		t.Fatal("SearchHighlightSGR returned !ok")
 	}
 	if start == "" {
 		t.Fatal("empty start sequence")

@@ -9,7 +9,7 @@ import (
 	"github.com/gammons/slk/internal/ui/styles"
 )
 
-// searchHighlightSGR derives the raw open/close SGR sequences for
+// SearchHighlightSGR derives the raw open/close SGR sequences for
 // SearchHighlightStyle by rendering a sentinel and splitting on it —
 // works for any lipgloss color profile without hand-building escapes.
 //
@@ -21,7 +21,7 @@ import (
 // append the theme bg+fg restore (the same style argument render.go uses)
 // to the close sequence itself, targeting exactly the resets the
 // highlighter introduces.
-func searchHighlightSGR() (start, end string, ok bool) {
+func SearchHighlightSGR() (start, end string, ok bool) {
 	parts := strings.SplitN(styles.SearchHighlightStyle().Render("\x00"), "\x00", 2)
 	if len(parts) != 2 || parts[0] == "" {
 		return "", "", false

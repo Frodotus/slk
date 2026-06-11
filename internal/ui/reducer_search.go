@@ -63,12 +63,18 @@ var reduceSearch reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 // workspace search query for the ctrl+f results modal: whitespace-split
 // tokens minus Slack search modifiers (any token containing ':', e.g.
 // from:@user, in:#general, before:2026-01-01), each folded (text.Fold)
-// for case- and accent-insensitive matching. An empty result disables
-// highlighting.
+// for case- and accent-insensitive matching. Surrounding quote runes
+// are stripped so a quoted phrase highlights its individual words
+// (`"foo bar"` → foo, bar); tokens that strip to nothing are dropped.
+// An empty result disables highlighting.
 func workspaceHighlightTerms(query string) []string {
 	var terms []string
 	for _, tok := range strings.Fields(query) {
 		if strings.Contains(tok, ":") {
+			continue
+		}
+		tok = strings.Trim(tok, `"`)
+		if tok == "" {
 			continue
 		}
 		terms = append(terms, text.Fold(tok))

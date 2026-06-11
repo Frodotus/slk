@@ -407,6 +407,12 @@ func TestWorkspaceHighlightTermsDerivation(t *testing.T) {
 		{"from:@bob in:#general", nil},
 		{"", nil},
 		{"   ", nil},
+		// Quoted phrases highlight their words: the quote runes are
+		// stripped so they can't poison matching.
+		{`"foo bar" deploy`, []string{"foo", "bar", "deploy"}},
+		// A bare quote token strips to empty and is dropped.
+		{`"`, nil},
+		{`"" deploy`, []string{"deploy"}},
 	}
 	for _, c := range cases {
 		got := workspaceHighlightTerms(c.query)
@@ -430,11 +436,10 @@ func TestWorkspaceHighlightTermsDerivation(t *testing.T) {
 func TestWorkspaceSearchResultsInstallHighlightTerms(t *testing.T) {
 	styles.Apply("dark", config.Theme{})
 	t.Cleanup(func() { styles.Apply("dark", config.Theme{}) })
-	parts := strings.SplitN(styles.SearchHighlightStyle().Render("\x00"), "\x00", 2)
-	if len(parts) != 2 || parts[0] == "" {
+	hlStart, _, ok := messages.SearchHighlightSGR()
+	if !ok {
 		t.Fatal("could not derive highlight SGR")
 	}
-	hlStart := parts[0]
 
 	app := searchTestApp(t)
 	app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})

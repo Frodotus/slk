@@ -1866,11 +1866,11 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 	}
 	rendered := RenderSlackMarkdownWith(MessageTextSource(msg), bodyOpts)
 	if len(m.searchTerms) > 0 {
-		// searchHighlightSGR's close sequence restores the theme bg/fg
+		// SearchHighlightSGR's close sequence restores the theme bg/fg
 		// after the highlight's reset so plain body text doesn't bleed
 		// terminal-default colors. One derivation per renderMessagePlain
 		// call (i.e. per cache miss), not per line.
-		if hlStart, hlEnd, ok := searchHighlightSGR(); ok {
+		if hlStart, hlEnd, ok := SearchHighlightSGR(); ok {
 			rendered = HighlightSearchTerms(rendered, m.searchTerms, hlStart, hlEnd)
 		}
 	}

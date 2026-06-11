@@ -7,18 +7,19 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/gammons/slk/internal/config"
+	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/styles"
 )
 
 // hlSGR derives the open/close SGR sequences of the search-highlight
-// style via the same sentinel-split pattern the renderer uses.
+// style via the same helper the renderer uses.
 func hlSGR(t *testing.T) (string, string) {
 	t.Helper()
-	parts := strings.SplitN(styles.SearchHighlightStyle().Render("\x00"), "\x00", 2)
-	if len(parts) != 2 || parts[0] == "" {
+	start, end, ok := messages.SearchHighlightSGR()
+	if !ok {
 		t.Fatal("could not derive highlight SGR (theme not applied?)")
 	}
-	return parts[0], parts[1]
+	return start, end
 }
 
 // applyTheme installs a real theme so SearchHighlightStyle renders
@@ -31,11 +32,33 @@ func applyTheme(t *testing.T) {
 
 func TestSetHighlightTermsClonesInput(t *testing.T) {
 	m := New()
+	m.Open()
+	submitQuery(&m, "deploy")
 	terms := []string{"deploy"}
 	m.SetHighlightTerms(terms)
 	terms[0] = "mutated"
 	if m.highlightTerms[0] != "deploy" {
 		t.Fatalf("SetHighlightTerms aliased caller slice: %v", m.highlightTerms)
+	}
+}
+
+func TestSetHighlightTermsIgnoredWhenNotLoading(t *testing.T) {
+	m := New()
+	m.Open()
+	// No search in flight: a stale async install must not inject terms.
+	m.SetHighlightTerms([]string{"stale"})
+	if m.highlightTerms != nil {
+		t.Fatalf("stale SetHighlightTerms installed terms: %v", m.highlightTerms)
+	}
+
+	// After results land, a late install is also ignored.
+	submitQuery(&m, "deploy")
+	m.SetHighlightTerms([]string{"deploy"})
+	m.SetResults([]Item{{ChannelID: "C1", ChannelName: "general",
+		UserName: "grant", TS: "1.0", Text: "deploy"}}, 1)
+	m.SetHighlightTerms([]string{"late"})
+	if len(m.highlightTerms) != 1 || m.highlightTerms[0] != "deploy" {
+		t.Fatalf("late SetHighlightTerms overwrote terms: %v", m.highlightTerms)
 	}
 }
 

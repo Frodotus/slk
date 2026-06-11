@@ -489,8 +489,8 @@ func TestFourLineRowsWithSeparator(t *testing.T) {
 	}
 
 	// Row 1: metadata line, then the short snippet fits on line 2
-	// (indented, unselected: 4 spaces between border and text); line 3
-	// is blank.
+	// (indented, unselected: indicator column + 2-space indent between
+	// border and text); line 3 is blank.
 	if !strings.Contains(lines[4], "#ops") || !strings.Contains(lines[4], "sam") {
 		t.Errorf("line 1 of row 1 = %q, want metadata header", lines[4])
 	}
