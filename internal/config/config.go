@@ -53,6 +53,9 @@ type ExternalCommand struct {
 	Match      string   `toml:"match"`       // case-insensitive substring of the text
 	MatchRegex string   `toml:"match_regex"` // RE2 regular expression over the text
 	Channels   []string `toml:"channels"`    // optional: only these channel names
+	// IncludeSelf also auto-runs on your OWN messages (default: own
+	// messages are skipped). Useful for "trigger on something I type".
+	IncludeSelf bool `toml:"include_self"`
 }
 
 // HasAutoTrigger reports whether the command runs automatically on
