@@ -117,6 +117,33 @@ func (s *SectionStore) SectionForChannel(channelID string) (string, bool) {
 	return id, true
 }
 
+// SectionTypeStars is the Slack section type for the user's starred
+// conversations (the "Starred" sidebar section). Its membership arrives
+// empty from channelSections and is sourced from stars.list — see cmd/slk.
+const SectionTypeStars = "stars"
+
+// SectionIDByType returns the ID of the section with the given type
+// (e.g. SectionTypeStars). Used to target the Starred section when
+// applying membership fetched out-of-band via stars.list, since that
+// section's own membership arrives empty. When several sections share a
+// type (only possible for "standard"), the lexically-smallest ID is
+// returned so the result is deterministic regardless of map iteration.
+// Returns ok=false when the store isn't ready or no such section exists.
+func (s *SectionStore) SectionIDByType(sectionType string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.ready {
+		return "", false
+	}
+	best := ""
+	for id, sec := range s.sectionsByID {
+		if sec.Type == sectionType && (best == "" || id < best) {
+			best = id
+		}
+	}
+	return best, best != ""
+}
+
 // OrderedSections walks the linked-list (head-first) and returns the
 // sections that should render in the sidebar, filtered to the v1
 // type whitelist. Cycle protection: stops if a section is revisited.
@@ -164,6 +191,19 @@ func (s *SectionStore) OrderedSections() []*slk.SidebarSection {
 		}
 		cur = s.sectionsByID[cur.Next]
 	}
+
+	// Pin the Starred (stars) section to the top, matching the official
+	// client which always shows Starred first regardless of where Slack's
+	// section linked-list places it.
+	for i, sec := range out {
+		if sec.Type == "stars" {
+			if i > 0 {
+				out = append(out[:i], out[i+1:]...)
+				out = append([]*slk.SidebarSection{sec}, out...)
+			}
+			break
+		}
+	}
 	return out
 }
 
@@ -179,10 +219,13 @@ func includeInSidebar(sec *slk.SidebarSection) bool {
 	switch sec.Type {
 	case "standard", "channels", "direct_messages":
 		return true
-	case "recent_apps":
+	case "recent_apps", SectionTypeStars:
+		// recent_apps: slk has its own Apps logic for the empty case.
+		// stars: the user's Slack-starred conversations (the "Starred"
+		// section). Both render only when non-empty.
 		return len(sec.ChannelIDs) > 0
 	default:
-		// stars, slack_connect, salesforce_records, agents, anything new.
+		// slack_connect, salesforce_records, agents, anything new.
 		return false
 	}
 }

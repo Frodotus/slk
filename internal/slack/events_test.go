@@ -44,6 +44,9 @@ type mockEventHandler struct {
 	sectionChannelsRemovedSection string
 	sectionChannelsRemoved        []string
 
+	starAdded   []string
+	starRemoved []string
+
 	prefChanges []prefChangeRecord
 
 	memberJoined []memberEventRecord
@@ -140,6 +143,12 @@ func (m *mockEventHandler) OnChannelSectionChannelsRemoved(sectionID string, cha
 	m.sectionChannelsRemovedSection = sectionID
 	m.sectionChannelsRemoved = channelIDs
 }
+func (m *mockEventHandler) OnStarAdded(channelID string) {
+	m.starAdded = append(m.starAdded, channelID)
+}
+func (m *mockEventHandler) OnStarRemoved(channelID string) {
+	m.starRemoved = append(m.starRemoved, channelID)
+}
 func (m *mockEventHandler) OnPrefChange(name, value string) {
 	m.prefChanges = append(m.prefChanges, prefChangeRecord{name, value})
 }
@@ -211,6 +220,28 @@ func TestDispatchWebSocketReactionAddedEvent(t *testing.T) {
 	}
 	if handler.reactions[0] != "thumbsup" {
 		t.Errorf("expected 'thumbsup', got %q", handler.reactions[0])
+	}
+}
+
+func TestDispatchWebSocketStarEvents(t *testing.T) {
+	handler := &mockEventHandler{}
+
+	// Starring a channel fires OnStarAdded with the channel ID.
+	dispatchWebSocketEvent([]byte(`{"type":"star_added","item":{"type":"channel","channel":"C1"}}`), handler)
+	if len(handler.starAdded) != 1 || handler.starAdded[0] != "C1" {
+		t.Fatalf("star_added(channel): starAdded=%v, want [C1]", handler.starAdded)
+	}
+
+	// Starring a message is ignored — only conversations reach the sidebar.
+	dispatchWebSocketEvent([]byte(`{"type":"star_added","item":{"type":"message","channel":"C2","ts":"1.2"}}`), handler)
+	if len(handler.starAdded) != 1 {
+		t.Errorf("starred message must not fire OnStarAdded: starAdded=%v", handler.starAdded)
+	}
+
+	// Unstarring a channel fires OnStarRemoved.
+	dispatchWebSocketEvent([]byte(`{"type":"star_removed","item":{"type":"channel","channel":"C1"}}`), handler)
+	if len(handler.starRemoved) != 1 || handler.starRemoved[0] != "C1" {
+		t.Fatalf("star_removed(channel): starRemoved=%v, want [C1]", handler.starRemoved)
 	}
 }
 
