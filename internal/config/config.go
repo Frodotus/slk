@@ -22,6 +22,17 @@ type Config struct {
 	Sections      map[string]SectionDef        `toml:"sections"`
 	Theme         Theme                        `toml:"theme"`
 	Workspaces    map[string]Workspace         `toml:"workspaces"`
+	MCP           MCPConfig                    `toml:"mcp"`
+}
+
+// MCPConfig controls slk's MCP server, which exposes the current focus
+// (selected message / open thread / channel) to a local MCP client and
+// lets it draft into the compose box. slk never sends. Off by default.
+type MCPConfig struct {
+	Enabled bool `toml:"enabled"`
+	// SocketPath overrides the default unix socket location
+	// ($XDG_DATA_HOME/slk/mcp.sock). Usually left unset.
+	SocketPath string `toml:"socket_path"`
 }
 
 // SectionDef defines a sidebar section with channel name patterns.
