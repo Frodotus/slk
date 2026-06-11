@@ -894,7 +894,7 @@ func run() error {
 	// images (best-effort, non-blocking).
 	app.SetExternalCommands(cfg.ExternalCommands)
 	app.SetExtCmdImageResolver(func(m messages.MessageItem) []string {
-		return cachedMessageImagePaths(m, imageCache)
+		return cachedMessageImagePaths(m, imagesDir)
 	})
 
 	// Wire theme switcher: dispatch to the appropriate saver based on scope.
@@ -1756,7 +1756,7 @@ func run() error {
 	// MCP server: expose the current focus + a draft action to a local MCP
 	// client (e.g. Claude Code via `slk mcp`). Off unless [mcp] enabled.
 	if cfg.MCP.Enabled {
-		if closer, err := startMCPServer(cfg, app, p, imageCache); err != nil {
+		if closer, err := startMCPServer(cfg, app, p, imagesDir); err != nil {
 			debuglog.General("mcp: failed to start server: %v", err)
 		} else if closer != nil {
 			defer closer.Close()
@@ -2124,38 +2124,41 @@ func fetchBrowseableChannels(ctx context.Context, wctx *WorkspaceContext, p *tea
 // Best-effort and non-blocking: the cache key embeds the rendered thumb
 // size, so it probes a few target sizes. Uncached images are skipped (no
 // download); fetching originals on demand is a planned follow-up.
-func cachedMessageImagePaths(m messages.MessageItem, imageCache *imgpkg.Cache) []string {
-	if imageCache == nil {
+// cachedMessageImagePaths returns on-disk paths of a message's images that
+// are already in the image cache (rendered previously). The cache stores
+// each rendered image as "<fileID>-<size>.<ext>", so it globs the cache
+// directory by the Slack file id and returns the largest cached variant per
+// image (best for an MCP client to read/OCR). This is robust to whatever
+// render size slk happened to cache; uncached images are skipped (no
+// download).
+func cachedMessageImagePaths(m messages.MessageItem, imagesDir string) []string {
+	if imagesDir == "" {
 		return nil
 	}
-	probes := []image.Point{{X: 200, Y: 200}, {X: 400, Y: 400}, {X: 800, Y: 800}, {X: 1600, Y: 1600}}
 	var paths []string
 	for _, att := range m.Attachments {
-		if att.Kind != "image" || att.FileID == "" || len(att.Thumbs) == 0 {
+		if att.Kind != "image" || att.FileID == "" {
 			continue
 		}
-		thumbs := make([]imgpkg.ThumbSpec, len(att.Thumbs))
-		for i, t := range att.Thumbs {
-			thumbs[i] = imgpkg.ThumbSpec{URL: t.URL, W: t.W, H: t.H}
-		}
-		seen := map[string]bool{}
-		for _, tg := range probes {
-			_, suffix := imgpkg.PickThumb(thumbs, tg)
-			if suffix == "" {
-				continue
-			}
-			key := att.FileID + "-" + suffix
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			if path, ok := imageCache.Get(key); ok {
-				paths = append(paths, path)
-				break
-			}
+		matches, _ := filepath.Glob(filepath.Join(imagesDir, att.FileID+"-*"))
+		if best := largestFile(matches); best != "" {
+			paths = append(paths, best)
 		}
 	}
 	return paths
+}
+
+// largestFile returns the path with the greatest file size, or "".
+func largestFile(paths []string) string {
+	var best string
+	var bestSize int64 = -1
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && fi.Size() > bestSize {
+			bestSize = fi.Size()
+			best = p
+		}
+	}
+	return best
 }
 
 func extractAttachments(files []slack.File) []messages.Attachment {
