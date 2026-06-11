@@ -277,7 +277,8 @@ func TestNoScrollbarWhenListFits(t *testing.T) {
 	submitQuery(&m, "deploy")
 	m.SetResults(manyItems(3), 3)
 
-	lines := strings.Split(ansi.Strip(m.View(80, 24)), "\n")
+	// 30-row terminal: visibleRowCap(30) = 3, so all 3 items fit.
+	lines := strings.Split(ansi.Strip(m.View(80, 30)), "\n")
 	for i, row := range lines[listTopOffset : listTopOffset+rowLines*3] {
 		if g := gutterRune(row); g != ' ' {
 			t.Fatalf("line %d gutter = %q, want blank (no scrollbar)", i, g)
@@ -410,16 +411,16 @@ func TestScrollWindowEdges(t *testing.T) {
 	submitQuery(&m, "deploy")
 	m.SetResults(manyItems(15), 15)
 
-	// 30 rows: visibleRowCap(30) = 4 (70% budget 21, chrome 7, 3-line
-	// rows). Walk to the bottom: window pins to the last 4 items.
+	// 30 rows: visibleRowCap(30) = 3 (70% budget 21, chrome 7, 4-line
+	// rows). Walk to the bottom: window pins to the last 3 items.
 	for i := 0; i < 20; i++ {
 		m.HandleKey("down")
 	}
 	if m.selected != 14 {
 		t.Fatalf("selected = %d, want 14", m.selected)
 	}
-	if start, end := m.visibleWindow(30); start != 11 || end != 15 {
-		t.Fatalf("bottom window = [%d,%d), want [11,15)", start, end)
+	if start, end := m.visibleWindow(30); start != 12 || end != 15 {
+		t.Fatalf("bottom window = [%d,%d), want [12,15)", start, end)
 	}
 
 	// Walk back to the top.
@@ -429,15 +430,16 @@ func TestScrollWindowEdges(t *testing.T) {
 	if m.selected != 0 {
 		t.Fatalf("selected = %d, want 0", m.selected)
 	}
-	if start, end := m.visibleWindow(30); start != 0 || end != 4 {
-		t.Fatalf("top window = [%d,%d), want [0,4)", start, end)
+	if start, end := m.visibleWindow(30); start != 0 || end != 3 {
+		t.Fatalf("top window = [%d,%d), want [0,3)", start, end)
 	}
 }
 
 // resultLines returns the stripped rendered list lines for the current
-// visible window (rowLines lines per result row).
+// visible window (rowLines lines per result row). The 30-row terminal
+// gives a 3-row window (visibleRowCap(30) = 3 at rowLines = 4).
 func resultLines(m Model, n int) []string {
-	lines := strings.Split(ansi.Strip(m.View(80, 24)), "\n")
+	lines := strings.Split(ansi.Strip(m.View(80, 30)), "\n")
 	return lines[listTopOffset : listTopOffset+n]
 }
 
@@ -447,7 +449,7 @@ func blankLine(line string) bool {
 	return strings.Trim(line, " │") == ""
 }
 
-func TestThreeLineRowsWithSeparator(t *testing.T) {
+func TestFourLineRowsWithSeparator(t *testing.T) {
 	m := New()
 	m.Open()
 	submitQuery(&m, "deploy")
@@ -457,37 +459,53 @@ func TestThreeLineRowsWithSeparator(t *testing.T) {
 		{ChannelID: "C2", ChannelName: "ops", UserName: "sam", TS: "2.0", Text: "short"},
 	}, 2)
 
-	lines := resultLines(m, 6)
+	lines := resultLines(m, 8)
 
-	// Row 0: long snippet starts on line 1 and continues on line 2,
-	// truncated with an ellipsis since more remains.
-	if !strings.Contains(lines[0], "#general") || !strings.Contains(lines[0], "lorem ipsum") {
-		t.Errorf("line 1 of row 0 = %q, want header + snippet start", lines[0])
+	// Row 0 line 1: metadata only — channel, author, timestamp, and
+	// crucially no snippet text.
+	if !strings.Contains(lines[0], "#general") || !strings.Contains(lines[0], "grant") {
+		t.Errorf("line 1 of row 0 = %q, want metadata header", lines[0])
 	}
-	if !strings.Contains(lines[1], "lorem") {
-		t.Errorf("line 2 of row 0 = %q, want snippet continuation", lines[1])
+	if strings.Contains(lines[0], "lorem") {
+		t.Errorf("line 1 of row 0 = %q, must not carry snippet text", lines[0])
 	}
-	if !strings.Contains(lines[1], "…") {
-		t.Errorf("line 2 of row 0 = %q, want … overflow marker", lines[1])
+	// Lines 2-3: the snippet, indented 2 spaces. Row 0 is selected, so
+	// the ▌ indicator precedes the indent.
+	if !strings.Contains(lines[1], "▌  lorem") {
+		t.Errorf("line 2 of row 0 = %q, want 2-space-indented snippet", lines[1])
 	}
-	if strings.Contains(lines[1], "ENDMARK") {
-		t.Errorf("line 2 of row 0 should be truncated before the snippet tail")
+	if !strings.Contains(lines[2], "lorem") {
+		t.Errorf("line 3 of row 0 = %q, want snippet continuation", lines[2])
 	}
-	// Line 3 of row 0 is the blank separator.
-	if !blankLine(lines[2]) {
-		t.Errorf("line 3 of row 0 = %q, want blank separator", lines[2])
+	if !strings.Contains(lines[2], "…") {
+		t.Errorf("line 3 of row 0 = %q, want … overflow marker", lines[2])
+	}
+	if strings.Contains(lines[2], "ENDMARK") {
+		t.Errorf("line 3 of row 0 should be truncated before the snippet tail")
+	}
+	// Line 4 of row 0 is the blank separator.
+	if !blankLine(lines[3]) {
+		t.Errorf("line 4 of row 0 = %q, want blank separator", lines[3])
 	}
 
-	// Row 1: short snippet fits entirely on line 1; line 2 is blank.
-	if !strings.Contains(lines[3], "#ops") || !strings.Contains(lines[3], "short") {
-		t.Errorf("line 1 of row 1 = %q, want header + full snippet", lines[3])
+	// Row 1: metadata line, then the short snippet fits on line 2
+	// (indented, unselected: 4 spaces between border and text); line 3
+	// is blank.
+	if !strings.Contains(lines[4], "#ops") || !strings.Contains(lines[4], "sam") {
+		t.Errorf("line 1 of row 1 = %q, want metadata header", lines[4])
 	}
-	if !blankLine(lines[4]) {
-		t.Errorf("line 2 of row 1 = %q, want blank continuation", lines[4])
+	if strings.Contains(lines[4], "short") {
+		t.Errorf("line 1 of row 1 = %q, must not carry snippet text", lines[4])
+	}
+	if !strings.Contains(lines[5], "   short") {
+		t.Errorf("line 2 of row 1 = %q, want indented snippet", lines[5])
+	}
+	if !blankLine(lines[6]) {
+		t.Errorf("line 3 of row 1 = %q, want blank continuation", lines[6])
 	}
 	// Trailing separator after the last row is fine (and expected).
-	if !blankLine(lines[5]) {
-		t.Errorf("line 3 of row 1 = %q, want blank separator", lines[5])
+	if !blankLine(lines[7]) {
+		t.Errorf("line 4 of row 1 = %q, want blank separator", lines[7])
 	}
 }
 
@@ -510,6 +528,9 @@ func TestContinuationNoMidRunSplitOfWideRunes(t *testing.T) {
 			t.Errorf("line %d width = %d, want boxWidth(80) = %d", i, w, boxWidth(80))
 		}
 	}
+	// The snippet occupies lines 2-3 of the block (indices 1-2); the
+	// metadata line carries none of it.
+	snipLines := lines[1:3]
 
 	// Extract the snippet portion of each line: the snippet is the only
 	// source of these wide runes, so filtering to the snippet alphabet
@@ -530,7 +551,10 @@ func TestContinuationNoMidRunSplitOfWideRunes(t *testing.T) {
 		}
 		return b.String()
 	}
-	head, tail := extract(lines[0]), extract(lines[1])
+	head, tail := extract(snipLines[0]), extract(snipLines[1])
+	if got := extract(lines[0]); got != "" {
+		t.Errorf("metadata line carries snippet runes: %q", got)
+	}
 	if head == "" || tail == "" {
 		t.Fatalf("expected snippet content on both lines; head=%q tail=%q", head, tail)
 	}
@@ -549,13 +573,13 @@ func TestSelectedIndicatorOnContentLinesOnly(t *testing.T) {
 	m.SetResults(manyItems(3), 3)
 	m.HandleKey("down") // select row 1
 
-	// The ▌ indicator marks both content lines of the selected row but
-	// never its blank separator line.
-	lines := resultLines(m, 9)
+	// The ▌ indicator marks the metadata and snippet lines (1-3) of the
+	// selected row but never its blank separator line.
+	lines := resultLines(m, 12)
 	for i, want := range []bool{
-		false, false, false, // row 0
-		true, true, false, // row 1 (selected): content yes, separator no
-		false, false, false, // row 2
+		false, false, false, false, // row 0
+		true, true, true, false, // row 1 (selected): content yes, separator no
+		false, false, false, false, // row 2
 	} {
 		has := strings.HasPrefix(strings.TrimLeft(lines[i], " "), "▌") ||
 			strings.Contains(lines[i], "▌")
@@ -586,9 +610,9 @@ func TestSeventyPercentSizing(t *testing.T) {
 		t.Errorf("BoxSize width = %d, want 140", w)
 	}
 	// Height budget is 42 (70% of 60); chrome is 8 (incl. footer), so
-	// 11 rows of rowLines(3) lines fit: 11*3 + 8 = 41.
-	if h != 41 {
-		t.Errorf("BoxSize height = %d, want 41 (fills the 70%% budget)", h)
+	// 8 rows of rowLines(4) lines fit: 8*4 + 8 = 40.
+	if h != 40 {
+		t.Errorf("BoxSize height = %d, want 40 (fills the 70%% budget)", h)
 	}
 	box := m.renderBox(200, 60)
 	if gw, gh := lipgloss.Width(box), lipgloss.Height(box); gw != w || gh != h {

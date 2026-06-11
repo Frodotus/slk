@@ -137,10 +137,10 @@ func TestModalClick_WorkspaceSearchRowActivates(t *testing.T) {
 	startX := (app.width - w) / 2
 	startY := (app.height - h) / 2
 
-	// Second result row: rows are three lines tall (two content lines
-	// plus a blank separator), so its first line is at box-local
-	// y = listTopOffset(5) + rowLines(3).
-	cmd := reduceMouseClick(app, tea.MouseClickMsg{Button: tea.MouseLeft, X: startX + 3, Y: startY + 5 + 3})
+	// Second result row: rows are four lines tall (metadata, two
+	// snippet lines, blank separator), so its first line is at
+	// box-local y = listTopOffset(5) + rowLines(4).
+	cmd := reduceMouseClick(app, tea.MouseClickMsg{Button: tea.MouseLeft, X: startX + 3, Y: startY + 5 + 4})
 	if cmd == nil {
 		t.Fatal("clicking a result row should return an activation cmd")
 	}

@@ -35,13 +35,13 @@ func TestClickRowSelectsItem(t *testing.T) {
 	submitQuery(&m, "deploy")
 	m.SetResults(manyItems(6), 6)
 
-	// visibleRowCap(24) = 3: three rows are visible.
-	if cap := m.visibleRowCap(24); cap != 3 {
-		t.Fatalf("visibleRowCap(24) = %d, want 3", cap)
+	// visibleRowCap(30) = 3: three rows are visible.
+	if cap := m.visibleRowCap(30); cap != 3 {
+		t.Fatalf("visibleRowCap(30) = %d, want 3", cap)
 	}
 
 	// Third visible row: its first line is at offset 2*rowLines.
-	if !m.ClickRow(80, 24, listTopOffset+2*rowLines) {
+	if !m.ClickRow(80, 30, listTopOffset+2*rowLines) {
 		t.Fatal("ClickRow on a populated row should return true")
 	}
 	if m.selected != 2 {
@@ -49,43 +49,43 @@ func TestClickRowSelectsItem(t *testing.T) {
 	}
 
 	// Clicking the input/title area (above the list) is a no-op.
-	if m.ClickRow(80, 24, listTopOffset-1) {
+	if m.ClickRow(80, 30, listTopOffset-1) {
 		t.Error("ClickRow above the list should return false")
 	}
 
 	// Clicking past the last visible row's separator is a no-op.
-	if m.ClickRow(80, 24, listTopOffset+3*rowLines) {
+	if m.ClickRow(80, 30, listTopOffset+3*rowLines) {
 		t.Error("ClickRow past the last visible row should return false")
 	}
 }
 
 // TestClickAnyLineSelectsRow verifies a click on any line of a
-// three-line row — header, continuation, or blank separator — selects
-// that row.
+// four-line row — metadata, either snippet line, or blank separator —
+// selects that row.
 func TestClickAnyLineSelectsRow(t *testing.T) {
 	m := New()
 	m.Open()
 	submitQuery(&m, "deploy")
 	m.SetResults(manyItems(6), 6)
 
-	// Second line of row 0.
-	if !m.ClickRow(80, 24, listTopOffset+1) {
+	// First snippet line of row 0.
+	if !m.ClickRow(80, 30, listTopOffset+1) {
 		t.Fatal("ClickRow on row 0 line 2 should return true")
 	}
 	if m.selected != 0 {
 		t.Errorf("selected = %d, want 0", m.selected)
 	}
 
-	// Second line of row 2.
-	if !m.ClickRow(80, 24, listTopOffset+2*rowLines+1) {
-		t.Fatal("ClickRow on row 2 line 2 should return true")
+	// Second snippet line of row 2.
+	if !m.ClickRow(80, 30, listTopOffset+2*rowLines+2) {
+		t.Fatal("ClickRow on row 2 line 3 should return true")
 	}
 	if m.selected != 2 {
 		t.Errorf("selected = %d, want 2", m.selected)
 	}
 
 	// Separator line of row 1 maps to row 1.
-	if !m.ClickRow(80, 24, listTopOffset+1*rowLines+2) {
+	if !m.ClickRow(80, 30, listTopOffset+1*rowLines+3) {
 		t.Fatal("ClickRow on row 1's separator should return true")
 	}
 	if m.selected != 1 {
@@ -101,13 +101,13 @@ func TestClickRowScrolledWindow(t *testing.T) {
 	m.Open()
 	submitQuery(&m, "deploy")
 	m.SetResults(manyItems(15), 15)
-	m.selected = 14 // window is [11, 15) at a 30-row terminal
+	m.selected = 14 // window is [12, 15) at a 30-row terminal
 
 	if !m.ClickRow(80, 30, listTopOffset+0) {
 		t.Fatal("ClickRow on first visible row should return true")
 	}
-	if m.selected != 11 {
-		t.Errorf("ClickRow set selected=%d, want 11 (window start)", m.selected)
+	if m.selected != 12 {
+		t.Errorf("ClickRow set selected=%d, want 12 (window start)", m.selected)
 	}
 }
 

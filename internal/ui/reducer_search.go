@@ -21,11 +21,13 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/ids"
+	"github.com/gammons/slk/internal/text"
 )
 
 // activeSearch is the in-channel `/` search state: the query, its
@@ -50,10 +52,28 @@ var reduceSearch reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			a.searchResults.SetError("Search failed: " + m.Err.Error())
 			return nil, true
 		}
+		a.searchResults.SetHighlightTerms(workspaceHighlightTerms(m.Query))
 		a.searchResults.SetResults(m.Items, m.Total)
 		return nil, true
 	}
 	return nil, false
+}
+
+// workspaceHighlightTerms derives the highlightable terms of a
+// workspace search query for the ctrl+f results modal: whitespace-split
+// tokens minus Slack search modifiers (any token containing ':', e.g.
+// from:@user, in:#general, before:2026-01-01), each folded (text.Fold)
+// for case- and accent-insensitive matching. An empty result disables
+// highlighting.
+func workspaceHighlightTerms(query string) []string {
+	var terms []string
+	for _, tok := range strings.Fields(query) {
+		if strings.Contains(tok, ":") {
+			continue
+		}
+		terms = append(terms, text.Fold(tok))
+	}
+	return terms
 }
 
 // reduceChannelSearchResults applies an in-channel `/` FTS result:

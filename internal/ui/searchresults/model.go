@@ -6,6 +6,7 @@ package searchresults
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -16,9 +17,9 @@ import (
 	"github.com/muesli/reflow/truncate"
 )
 
-// Item is one search hit, rendered as
-// "#channel  author  time  snippet". Built from Slack's search
-// response, so uncached channels/users display fine.
+// Item is one search hit, rendered as a block: a "#channel  author
+// time" metadata line over two indented snippet lines. Built from
+// Slack's search response, so uncached channels/users display fine.
 type Item struct {
 	ChannelID   string
 	ChannelName string
@@ -58,6 +59,9 @@ type Model struct {
 	st       state
 	errMsg   string
 	total    int
+	// highlightTerms are the active query's folded terms (see
+	// text.Fold); word-prefix occurrences light up in snippet lines.
+	highlightTerms []string
 }
 
 // New creates a new search results modal.
@@ -72,6 +76,15 @@ func (m *Model) Open() {
 	m.st = stateInput
 	m.errMsg = ""
 	m.total = 0
+	m.highlightTerms = nil
+}
+
+// SetHighlightTerms sets (or clears, with nil/empty) the folded terms
+// (text.Fold) whose word-prefix occurrences get highlighted in snippet
+// lines. The caller derives them from the submitted query; the slice
+// is cloned so later caller mutation can't alias modal state.
+func (m *Model) SetHighlightTerms(terms []string) {
+	m.highlightTerms = slices.Clone(terms)
 }
 
 // Close hides the modal.
@@ -173,10 +186,10 @@ func (m *Model) HandleKey(keyStr string) Action {
 // Shared by renderBox (implicitly) and ClickRow's hit-testing.
 const listTopOffset = 5
 
-// rowLines is how many screen lines each result row occupies: a header
-// line (#channel  author  time  snippet...), a snippet continuation,
-// and a blank separator line.
-const rowLines = 3
+// rowLines is how many screen lines each result row occupies: a
+// metadata line (#channel  author  time), two snippet lines, and a
+// blank separator line.
+const rowLines = 4
 
 // ClickRow maps a box-local row (localY, 0 = box top border) to a result
 // row. Result rows are rowLines tall; a click on any line of a row
@@ -432,9 +445,10 @@ func splitAtWidth(s string, w int) (head, tail string) {
 
 // resultRows renders the visible window of result rows plus the
 // "showing K of N" footer when the server reported more matches than
-// were fetched. Each result is rowLines (3) screen lines: a header line
-// ("#channel  author  timestamp  snippet..."), a snippet continuation
-// line truncated with "…" when more remains, and a blank separator.
+// were fetched. Each result is rowLines (4) screen lines: a metadata
+// line ("#channel  author  timestamp"), two 2-space-indented snippet
+// lines (the second truncated with "…" when more remains, or blank
+// when the snippet fits on one), and a blank separator.
 // When the fetched list overflows the visible window a proportional
 // scrollbar gutter is drawn on the right (same pattern as
 // channelfinder/workspacefinder/themeswitcher), spanning all lines of
@@ -474,6 +488,33 @@ func (m Model) resultRows(innerWidth, termHeight int) []string {
 	thumbStyle := lipgloss.NewStyle().Background(bg).Foreground(styles.Primary)
 	trackStyle := lipgloss.NewStyle().Background(bg).Foreground(styles.Border)
 
+	// Highlight open/close SGRs, derived once per render via the
+	// sentinel-split pattern (same guard as the messages pane's call
+	// site). The close appends the modal bg/fg restore so the
+	// highlighter's reset can't bleed terminal-default colors before
+	// renderBox's ReapplyBgAfterResets pass.
+	var hlStart, hlEnd string
+	if len(m.highlightTerms) > 0 {
+		if parts := strings.SplitN(styles.SearchHighlightStyle().Render("\x00"), "\x00", 2); len(parts) == 2 && parts[0] != "" {
+			hlStart = parts[0]
+			hlEnd = parts[1] + messages.BgANSI() + messages.FgANSI()
+		}
+	}
+	// highlight wraps term matches in a styled snippet span. Applied
+	// AFTER wrapping/truncation (the split math above stays plain-text;
+	// a match split across the two snippet lines simply doesn't light
+	// up) and AFTER textStyle.Render, so the selected row's
+	// Primary/Bold SGR is active at the match and gets re-applied by
+	// the highlighter after each close. Padding happens later and is
+	// lipgloss.Width-based (ANSI-aware), so the zero-width SGRs leave
+	// the geometry untouched.
+	highlight := func(seg string) string {
+		if hlStart == "" {
+			return seg
+		}
+		return messages.HighlightSearchTerms(seg, m.highlightTerms, hlStart, hlEnd)
+	}
+
 	var rows []string
 	for i := startIdx; i < endIdx; i++ {
 		item := m.items[i]
@@ -500,36 +541,40 @@ func (m Model) resultRows(innerWidth, termHeight int) []string {
 		channelName := flattenText(item.ChannelName)
 		userName := flattenText(item.UserName)
 
-		// Line 1: header + as much snippet as fits. The plain header
-		// width (snippet is plain too — flattenText emits no ANSI)
-		// decides the split point.
-		headerPlain := sigil + channelName + "  " + userName + "  " + item.Timestamp + "  "
-		part1, rest := splitAtWidth(snippet, contentWidth-lipgloss.Width(headerPlain))
+		// Line 1: metadata only — channel, author, timestamp.
 		line1 := chanStyle.Render(sigil+channelName) + "  " +
 			nameStyle.Render(userName) + "  " +
-			chanStyle.Render(item.Timestamp) + "  " +
-			textStyle.Render(part1)
-		// Defensive: an overlong header (part1 already "") still must
-		// not wrap the box. truncate.StringWithTail is ANSI-aware.
+			chanStyle.Render(item.Timestamp)
+		// Defensive: an overlong header still must not wrap the box.
+		// truncate.StringWithTail is ANSI-aware.
 		if lipgloss.Width(line1) > contentWidth {
 			line1 = truncate.StringWithTail(line1, uint(contentWidth), "…")
 		}
 
-		// Line 2: snippet continuation, truncated with "…" if more
-		// remains; blank when the snippet fit on line 1.
+		// Lines 2-3: the snippet, wrapped to two lines, each indented
+		// 2 spaces. The split math runs on plain text (flattenText
+		// emits no ANSI); styling is applied per line afterwards.
+		snippetWidth := contentWidth - 2
+		part1, rest := splitAtWidth(snippet, snippetWidth)
 		line2 := ""
+		if part1 != "" {
+			line2 = "  " + highlight(textStyle.Render(part1))
+		}
+		// Second snippet line: truncated with "…" if more remains;
+		// blank when the snippet fit on the first.
+		line3 := ""
 		if rest = strings.TrimLeft(rest, " "); rest != "" {
-			if lipgloss.Width(rest) > contentWidth {
-				rest = truncate.StringWithTail(rest, uint(contentWidth), "…")
+			if lipgloss.Width(rest) > snippetWidth {
+				rest = truncate.StringWithTail(rest, uint(snippetWidth), "…")
 			}
-			line2 = textStyle.Render(rest)
+			line3 = "  " + highlight(textStyle.Render(rest))
 		}
 
-		// Line 3: a blank separator between rows (trailing one above
+		// Line 4: a blank separator between rows (trailing one above
 		// the footer/border included). It never carries the selected
 		// indicator but does carry the scrollbar gutter rune.
-		for li, line := range []string{line1, line2, ""} {
-			separator := li == 2
+		for li, line := range []string{line1, line2, line3, ""} {
+			separator := li == 3
 			// Right-pad with spaces to fill the row.
 			if pad := contentWidth - lipgloss.Width(line); pad > 0 {
 				line += strings.Repeat(" ", pad)

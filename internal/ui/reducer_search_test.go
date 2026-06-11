@@ -12,9 +12,11 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/gammons/slk/internal/config"
 	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/searchresults"
+	"github.com/gammons/slk/internal/ui/styles"
 )
 
 func searchTestApp(t *testing.T) *App {
@@ -389,6 +391,69 @@ func TestWorkspaceSearchSelectNonMemberToastsInsteadOfNavigating(t *testing.T) {
 	}
 	if app.mode != ModeNormal || app.searchResults.IsVisible() {
 		t.Fatal("modal not closed")
+	}
+}
+
+func TestWorkspaceHighlightTermsDerivation(t *testing.T) {
+	cases := []struct {
+		query string
+		want  []string
+	}{
+		// Plain terms are folded (lowercased, diacritics stripped).
+		{"Deploy Café", []string{"deploy", "cafe"}},
+		// Slack modifiers (anything with a ':') are skipped.
+		{"deploy from:@bob in:#general before:2026-01-01", []string{"deploy"}},
+		// Modifiers-only query yields no highlightable terms.
+		{"from:@bob in:#general", nil},
+		{"", nil},
+		{"   ", nil},
+	}
+	for _, c := range cases {
+		got := workspaceHighlightTerms(c.query)
+		if len(got) != len(c.want) {
+			t.Errorf("workspaceHighlightTerms(%q) = %v, want %v", c.query, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("workspaceHighlightTerms(%q) = %v, want %v", c.query, got, c.want)
+				break
+			}
+		}
+	}
+}
+
+// TestWorkspaceSearchResultsInstallHighlightTerms verifies the reducer
+// pushes the query's highlightable terms into the modal when results
+// land: matched words in snippets render with the search-highlight SGR,
+// modifier tokens do not.
+func TestWorkspaceSearchResultsInstallHighlightTerms(t *testing.T) {
+	styles.Apply("dark", config.Theme{})
+	t.Cleanup(func() { styles.Apply("dark", config.Theme{}) })
+	parts := strings.SplitN(styles.SearchHighlightStyle().Render("\x00"), "\x00", 2)
+	if len(parts) != 2 || parts[0] == "" {
+		t.Fatal("could not derive highlight SGR")
+	}
+	hlStart := parts[0]
+
+	app := searchTestApp(t)
+	app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	query := "deploy in:#general"
+	for _, r := range query {
+		app.searchResults.HandleKey(string(r))
+	}
+	app.searchResults.HandleKey("enter")
+	app.Update(WorkspaceSearchResultsMsg{Query: query, Items: []searchresults.Item{
+		{ChannelID: "C2", ChannelName: "ops", UserName: "sam", TS: "2.0",
+			Text: "deploy to general"},
+	}, Total: 1})
+
+	out := app.searchResults.View(80, 30)
+	if !strings.Contains(out, hlStart+"deploy") {
+		t.Errorf("snippet term not highlighted after results landed:\n%q", out)
+	}
+	if strings.Contains(out, hlStart+"general") {
+		t.Errorf("modifier token must not be highlighted:\n%q", out)
 	}
 }
 
