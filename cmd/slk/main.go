@@ -3228,12 +3228,17 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 	}
 
 	// Auto-run external commands whose trigger matches this message.
-	// Fires once, on genuinely new incoming messages (not edits, not your
-	// own), across all workspaces/channels.
-	if len(h.autoCommands) > 0 && !edited && userID != h.currentUserID {
+	// Fires once, on genuinely new incoming messages (not edits), across all
+	// workspaces/channels. Your own messages are skipped per command unless
+	// it opts in with include_self.
+	if len(h.autoCommands) > 0 && !edited {
+		isSelf := userID != "" && userID == h.currentUserID
 		mentioned := h.currentUserID != "" && strings.Contains(text, "<@"+h.currentUserID+">")
 		chName := h.channelNames[channelID]
 		for _, ac := range h.autoCommands {
+			if isSelf && !ac.Cmd.IncludeSelf {
+				continue
+			}
 			if ac.Triggered(text, mentioned, chName) {
 				h.runAutoCommand(ac.Cmd, text, userID, ts, channelID, chName)
 			}
