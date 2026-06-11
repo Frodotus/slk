@@ -70,6 +70,13 @@ type EventHandler interface {
 	// channel_sections_channels_removed.
 	OnChannelSectionChannelsRemoved(sectionID string, channelIDs []string)
 
+	// OnStarAdded / OnStarRemoved are delivered for star_added /
+	// star_removed WS events, carrying the starred conversation's ID.
+	// The dispatcher filters out starred messages/files, so these only
+	// fire for channel/im/group stars (the Starred sidebar section).
+	OnStarAdded(channelID string)
+	OnStarRemoved(channelID string)
+
 	// OnPrefChange is called for pref_change WS events. Slack ships these
 	// for every user-pref mutation (mute/unmute, highlight words,
 	// notifications, etc.); receivers are expected to dispatch on `name`
@@ -457,6 +464,24 @@ func dispatchWebSocketEvent(data []byte, handler EventHandler) {
 			return
 		}
 		handler.OnChannelSectionChannelsRemoved(raw.SectionID, raw.ChannelIDs)
+
+	case "star_added":
+		var raw wsStarEvent
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return
+		}
+		if ch := raw.channelID(); ch != "" {
+			handler.OnStarAdded(ch)
+		}
+
+	case "star_removed":
+		var raw wsStarEvent
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return
+		}
+		if ch := raw.channelID(); ch != "" {
+			handler.OnStarRemoved(ch)
+		}
 
 	case "pref_change":
 		var evt wsPrefChangeEvent

@@ -72,6 +72,10 @@ type sectionsProviderAdapter struct {
 	store *service.SectionStore
 }
 
+// starredSectionLabel is the sidebar header for the Starred section when
+// Slack sends its name empty (which it does for the system stars section).
+const starredSectionLabel = "Starred"
+
 func (a sectionsProviderAdapter) Ready() bool {
 	return a.store != nil && a.store.Ready()
 }
@@ -83,10 +87,16 @@ func (a sectionsProviderAdapter) OrderedSlackSections() []sidebar.SectionMeta {
 	secs := a.store.OrderedSections()
 	out := make([]sidebar.SectionMeta, 0, len(secs))
 	for _, s := range secs {
+		name, emoji := s.Name, s.Emoji
+		if s.Type == service.SectionTypeStars && name == "" {
+			// Slack sends the stars section with an empty name; supply
+			// the familiar "Starred" label. No emoji — plain text.
+			name = starredSectionLabel
+		}
 		out = append(out, sidebar.SectionMeta{
 			ID:    s.ID,
-			Name:  s.Name,
-			Emoji: s.Emoji,
+			Name:  name,
+			Emoji: emoji,
 			Type:  s.Type,
 		})
 	}
@@ -1895,6 +1905,23 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 			log.Printf("section store bootstrap for %s failed: %v (falling back to config sections)", token.TeamName, err)
 		} else {
 			wctx.SectionStore = store
+			// The channelSections "stars" section arrives with empty
+			// membership; the user's starred channels live in the legacy
+			// stars.list API. Fetch them and feed them into the stars
+			// section so it renders (before GetChannels, so the first
+			// buildChannelItem pass already buckets them). Best-effort: a
+			// failure just leaves Starred empty until a star_added event.
+			// Bound the fetch so a slow/hung Slack response can't delay the
+			// initial UI render — it's best-effort either way.
+			starCtx, cancelStars := context.WithTimeout(ctx, 5*time.Second)
+			if starIDs, serr := client.StarsList(starCtx); serr != nil {
+				log.Printf("stars.list for %s failed: %v (Starred empty until a star event)", token.TeamName, serr)
+			} else if len(starIDs) > 0 {
+				if secID, ok := store.SectionIDByType(service.SectionTypeStars); ok {
+					store.ApplyChannelsAdded(secID, starIDs)
+				}
+			}
+			cancelStars()
 			// One-time info log when the user has both Slack sections
 			// active AND a non-empty [sections.*] config — the latter
 			// is being shadowed.
@@ -3874,6 +3901,32 @@ func (h *rtmEventHandler) OnChannelSectionChannelsRemoved(sectionID string, chan
 	}
 	h.wsCtx.SectionStore.ApplyChannelsRemoved(sectionID, channelIDs)
 	h.refreshSectionsForActive()
+}
+
+// OnStarAdded handles a star_added WS event: add the starred channel to
+// the Starred section live (Slack stores stars outside channelSections,
+// so star events are the only live signal). Starred messages/files are
+// filtered out by the dispatcher.
+func (h *rtmEventHandler) OnStarAdded(channelID string) {
+	if h.wsCtx == nil || h.wsCtx.SectionStore == nil {
+		return
+	}
+	if secID, ok := h.wsCtx.SectionStore.SectionIDByType(service.SectionTypeStars); ok {
+		h.wsCtx.SectionStore.ApplyChannelsAdded(secID, []string{channelID})
+		h.refreshSectionsForActive()
+	}
+}
+
+// OnStarRemoved handles a star_removed WS event: drop the channel from
+// the Starred section (it rebuckets via type-default).
+func (h *rtmEventHandler) OnStarRemoved(channelID string) {
+	if h.wsCtx == nil || h.wsCtx.SectionStore == nil {
+		return
+	}
+	if secID, ok := h.wsCtx.SectionStore.SectionIDByType(service.SectionTypeStars); ok {
+		h.wsCtx.SectionStore.ApplyChannelsRemoved(secID, []string{channelID})
+		h.refreshSectionsForActive()
+	}
 }
 
 // OnPrefChange handles user-pref mutations from the WebSocket. Currently
