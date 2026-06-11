@@ -52,8 +52,9 @@ existing section machinery (flip one filter):
 - **Placement.** Pinned to the **top** of the sidebar — `OrderedSections` hoists
   the `stars` section to the head deterministically, regardless of Slack's `Next`
   chain (the official client always shows Starred first).
-- **Label / emoji.** Use the section's `Name`/`Emoji` from Slack; Slack sends the
-  stars section's name/emoji **empty**, so fall back to `Starred` + ⭐.
+- **Label.** Use the section's `Name` from Slack; Slack sends the stars section's
+  name **empty**, so fall back to a plain-text `Starred` label (no emoji — it
+  renders inconsistently across terminals, and plain text matches Slack).
 - **No duplication.** A starred channel appears **only** in Starred, not also in
   its normal section.
 - **Never auto-hidden.** Starred channels are exempt from `hide_inactive_after_days`.
@@ -83,7 +84,7 @@ existing section machinery (flip one filter):
 6. **`SectionIDByType`** (`SectionStore`) — find the stars section ID to target.
 
 7. **Label/emoji fallback** — at the `SectionMeta` construction site
-   (`cmd/slk/main.go`), default an empty `stars` name to `Starred`, emoji to `star`.
+   (`cmd/slk/main.go`), default an empty `stars` name to `Starred` (no emoji).
 
 ## Scope limitation
 
@@ -99,7 +100,7 @@ Starred section. Noted in `wiki/Configuration.md`.
   repointed to `slack_connect`.
 - `events_test.go`: `star_added`/`star_removed` dispatch → `OnStarAdded`/`Removed`
   with the channel ID; a starred **message** is filtered out.
-- `cmd/slk`: `Starred`/⭐ label fallback.
+- `cmd/slk`: plain-text `Starred` label fallback.
 
 ## Files touched
 
