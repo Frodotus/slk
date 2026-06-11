@@ -2867,7 +2867,7 @@ func searchWorkspaceFunc(router *workspaceRouter, db *cache.DB, tsFormat string)
 			}
 			return "", false
 		}
-		items := searchResultItems(res.Matches, tsFormat, resolveUser, resolveChannel)
+		items := searchResultItems(res.Matches, tsFormat, time.Now(), resolveUser, resolveChannel)
 		return ui.WorkspaceSearchResultsMsg{Query: query, Items: items, Total: res.Total}
 	}
 }
@@ -2882,7 +2882,7 @@ var userIDShapeRe = regexp.MustCompile(`^[UW][A-Z0-9]{5,}$`)
 // channel names (raw user IDs on the wire) are resolved to the
 // counterpart's display name, and thread TSes are recovered from
 // permalinks. Pure: all lookups go through the supplied resolvers.
-func searchResultItems(matches []slack.SearchMessage, tsFormat string, resolveUser, resolveChannel func(id string) (string, bool)) []searchresults.Item {
+func searchResultItems(matches []slack.SearchMessage, tsFormat string, now time.Time, resolveUser, resolveChannel func(id string) (string, bool)) []searchresults.Item {
 	items := make([]searchresults.Item, 0, len(matches))
 	for _, match := range matches {
 		// ThreadTS comes from the hit's permalink. Known v1
@@ -2914,11 +2914,36 @@ func searchResultItems(matches []slack.SearchMessage, tsFormat string, resolveUs
 			TS:          match.Timestamp,
 			ThreadTS:    threadTS,
 			Text:        messages.FlattenMrkdwn(match.Text, resolveUser, resolveChannel),
-			Timestamp:   formatTimestamp(match.Timestamp, tsFormat),
+			Timestamp:   formatSearchTimestamp(match.Timestamp, tsFormat, now),
 			IsDM:        isDM,
 		})
 	}
 	return items
+}
+
+// formatSearchTimestamp formats a search-result timestamp for the
+// modal's metadata line. Results span months, so non-today hits get a
+// date prefix: "May 19, 8:01 PM" this year, "May 19 2025, 8:01 PM" for
+// prior years. Today's hits show just the time (like Slack, and
+// mirroring the message pane's "Today" separator). Unparseable
+// timestamps fall back to the raw value, matching formatTimestamp.
+func formatSearchTimestamp(ts, timeFormat string, now time.Time) string {
+	parts := strings.SplitN(ts, ".", 2)
+	sec, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return ts
+	}
+	t := time.Unix(sec, 0)
+	ny, nm, nd := now.Date()
+	ty, tm, td := t.Date()
+	switch {
+	case ty == ny && tm == nm && td == nd:
+		return t.Format(timeFormat)
+	case ty == ny:
+		return t.Format("Jan 2, ") + t.Format(timeFormat)
+	default:
+		return t.Format("Jan 2 2006, ") + t.Format(timeFormat)
+	}
 }
 
 func formatTimestamp(ts, format string) string {

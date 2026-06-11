@@ -6,7 +6,9 @@
 package main
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/slack-go/slack"
 )
@@ -38,8 +40,12 @@ func testResolveChannel(id string) (string, bool) {
 	return "", false
 }
 
+// testNow is the fixed "current time" used by conversion tests so
+// today/this-year/prior-year date formatting is deterministic.
+var testNow = time.Date(2026, time.June, 11, 12, 0, 0, 0, time.Local)
+
 func convert(matches ...slack.SearchMessage) []searchItemsOut {
-	items := searchResultItems(matches, "15:04", testResolveUser, testResolveChannel)
+	items := searchResultItems(matches, "15:04", testNow, testResolveUser, testResolveChannel)
 	out := make([]searchItemsOut, len(items))
 	for i, it := range items {
 		out[i] = searchItemsOut{it.ChannelName, it.Text, it.IsDM}
@@ -115,8 +121,54 @@ func TestSearchResultItemsRegularChannelNameNotTreatedAsUser(t *testing.T) {
 func TestSearchResultItemsThreadTSFromPermalink(t *testing.T) {
 	m := searchMatch("C1", "general", "grant", "reply")
 	m.Permalink = "https://x.slack.com/archives/C1/p1700000002000200?thread_ts=1700000001.000100&cid=C1"
-	items := searchResultItems([]slack.SearchMessage{m}, "15:04", testResolveUser, testResolveChannel)
+	items := searchResultItems([]slack.SearchMessage{m}, "15:04", testNow, testResolveUser, testResolveChannel)
 	if items[0].ThreadTS != "1700000001.000100" {
 		t.Errorf("ThreadTS = %q, want %q", items[0].ThreadTS, "1700000001.000100")
+	}
+}
+
+func TestSearchResultItemsTimestampIncludesDate(t *testing.T) {
+	slackTS := func(tm time.Time) string {
+		return fmt.Sprintf("%d.000100", tm.Unix())
+	}
+	cases := []struct {
+		name string
+		when time.Time
+		want string
+	}{
+		{
+			name: "today shows time only",
+			when: time.Date(2026, time.June, 11, 20, 1, 0, 0, time.Local),
+			want: "20:01",
+		},
+		{
+			name: "same year shows month and day",
+			when: time.Date(2026, time.May, 19, 20, 1, 0, 0, time.Local),
+			want: "May 19, 20:01",
+		},
+		{
+			name: "prior year includes year",
+			when: time.Date(2025, time.May, 19, 20, 1, 0, 0, time.Local),
+			want: "May 19 2025, 20:01",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := searchMatch("C1", "general", "grant", "hello")
+			m.Timestamp = slackTS(tc.when)
+			items := searchResultItems([]slack.SearchMessage{m}, "15:04", testNow, testResolveUser, testResolveChannel)
+			if items[0].Timestamp != tc.want {
+				t.Errorf("Timestamp = %q, want %q", items[0].Timestamp, tc.want)
+			}
+		})
+	}
+}
+
+func TestSearchResultItemsTimestampUnparseableFallsBack(t *testing.T) {
+	m := searchMatch("C1", "general", "grant", "hello")
+	m.Timestamp = "garbage"
+	items := searchResultItems([]slack.SearchMessage{m}, "15:04", testNow, testResolveUser, testResolveChannel)
+	if items[0].Timestamp != "garbage" {
+		t.Errorf("Timestamp = %q, want raw value kept", items[0].Timestamp)
 	}
 }
