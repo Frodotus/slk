@@ -649,6 +649,7 @@ func run() error {
 	app.SetPanelBorders(cfg.Appearance.PanelBorders)
 	app.SetHelpFooter(versionpkg.ModalFooter(version))
 	app.SetClipboardAvailable(clipboardOK)
+	app.SetKeepFocusOnList(cfg.General.KeepFocusOnList)
 	if useWaylandClipboard {
 		app.SetClipboardReader(ui.WaylandClipboardReader())
 	}

@@ -9,6 +9,9 @@ Config lives at `~/.config/slk/config.toml`.
 default_workspace = "work"      # the slug, not the team ID
 use_slack_sections = true       # use real Slack sidebar sections (default).
                                 # set false to use [sections.*] globs instead.
+keep_focus_on_list = false      # keep keyboard focus on the list when you
+                                # select a channel / open a thread (default
+                                # false). see "Browsing without losing focus".
 
 [appearance]
 theme = "dracula"
@@ -146,6 +149,21 @@ also runs automatically on incoming messages (across all workspaces and
 channels), firing if **any** of its triggers match. `channels` limits it to
 named channels. Your own messages are skipped unless `include_self = true`. A
 command can be both manual (`x`) and auto.
+
+## Browsing without losing focus
+
+By default, picking a channel from the sidebar — or opening a thread — moves
+keyboard focus into the content pane, so you can immediately `j/k` through
+messages, react, and reply. The trade-off: to try another channel you have
+to `Tab`/`h` back to the sidebar first.
+
+Set `keep_focus_on_list = true` under `[general]` to keep focus on the list
+instead. Selecting a channel or opening a thread still loads the content,
+but keyboard focus stays put — so you can keep walking the list with `j/k`
+and `Enter` without tabbing back each time. When you want to read or reply,
+step into the content with `Tab`, `l`, or `→`. This applies to all three
+list→content jumps: sidebar → channel, threads view → thread, and a channel
+message → its thread. The default is `false` (focus follows selection).
 
 ## Section resolution
 

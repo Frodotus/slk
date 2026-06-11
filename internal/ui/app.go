@@ -150,6 +150,12 @@ type App struct {
 	// clipboard.Init(). When false, Ctrl+V smart-paste is a no-op.
 	clipboardAvailable bool
 
+	// keepFocusOnList, when true, keeps keyboard focus on the list
+	// (sidebar / threads list / message list) after selecting a channel
+	// or opening a thread, rather than moving focus into the content
+	// pane. Opt-in browse aid; see config [general] keep_focus_on_list.
+	keepFocusOnList bool
+
 	// clipboardRead is the function used by smartPaste to read OS
 	// clipboard contents. Tests inject fakes via SetClipboardReader.
 	clipboardRead clipboardReader
@@ -1379,7 +1385,9 @@ func (a *App) handleEnter() tea.Cmd {
 		a.lastOpenedChannelID = ""
 		a.lastOpenedThreadTS = ""
 		cmd := a.openSelectedThreadCmd(false)
-		a.focusedPanel = PanelThread
+		if !a.keepFocusOnList {
+			a.focusedPanel = PanelThread
+		}
 		return cmd
 	}
 
@@ -1417,7 +1425,9 @@ func (a *App) openThreadForSelectedMessage() tea.Cmd {
 func (a *App) openThreadPanel(parent messages.MessageItem, channelID, threadTS string) tea.Cmd {
 	a.threadVisible = true
 	a.statusbar.SetInThread(true)
-	a.focusedPanel = PanelThread
+	if !a.keepFocusOnList {
+		a.focusedPanel = PanelThread
+	}
 	a.threadPanel.SetThread(parent, nil, channelID, threadTS)
 	a.threadCompose.SetChannel("thread")
 	a.applyThreadUnreadBoundary(channelID)
@@ -1755,6 +1765,13 @@ func (a *App) SetUploader(fn UploadFunc) {
 // is short-circuited.
 func (a *App) SetClipboardAvailable(ok bool) {
 	a.clipboardAvailable = ok
+}
+
+// SetKeepFocusOnList toggles the browse-friendly mode where selecting a
+// channel or opening a thread loads the content but leaves keyboard
+// focus on the list. See config [general] keep_focus_on_list.
+func (a *App) SetKeepFocusOnList(v bool) {
+	a.keepFocusOnList = v
 }
 
 // SetClipboardReader replaces the clipboard read function. Used by
