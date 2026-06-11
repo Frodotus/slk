@@ -29,6 +29,7 @@
 - Vim-style modal keybindings, fuzzy channel finder, workspace picker
 - 59 themes + drop-in custom themes, live theme switcher
 - OS desktop notifications on DMs, mentions, and configurable keywords
+- External commands: run a program on a message (text + images), manually (`x`) or auto-triggered on a mention / keyword / regex
 
 Full feature breakdown: **[[Features|https://github.com/gammons/slk/wiki/Features]]**
 
