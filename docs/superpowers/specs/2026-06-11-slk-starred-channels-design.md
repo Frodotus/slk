@@ -110,6 +110,16 @@ Starred section. Noted in `wiki/Configuration.md`.
 - `cmd/slk/main.go` (+ `starred_section_test.go`) — bootstrap fetch, WS handlers, label fallback.
 - `wiki/Configuration.md` — Starred-section note + Slack-native-mode requirement.
 
+## Known limitations (v1)
+
+- **Unstar of a custom-section channel.** Feeding starred channels into the
+  stars section overwrites `SectionStore`'s 1:1 channel→section mapping. So a
+  channel that was in a **custom** Slack section, starred, then unstarred returns
+  to the type-default catch-all rather than its original custom section (until a
+  re-sync re-asserts that section's membership). The common case — channels in
+  the catch-all — is unaffected. The proper fix is a separate "starred overlay"
+  index that remembers each channel's real section; deferred as a follow-up.
+
 ## Out of scope
 
 - Star/unstar from within slk (write path).
