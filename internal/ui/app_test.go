@@ -38,14 +38,23 @@ func TestAppFocusCycle(t *testing.T) {
 		t.Errorf("expected focus on messages, got %d", app.focusedPanel)
 	}
 
+	// Messages is the rightmost panel (no thread open) — FocusNext clamps
+	// instead of wrapping back to the sidebar.
 	app.FocusNext()
-	if app.focusedPanel != PanelSidebar {
-		t.Errorf("expected focus to wrap to sidebar, got %d", app.focusedPanel)
+	if app.focusedPanel != PanelMessages {
+		t.Errorf("expected focus to clamp at messages (no wrap), got %d", app.focusedPanel)
 	}
 
 	app.FocusPrev()
-	if app.focusedPanel != PanelMessages {
-		t.Errorf("expected focus on messages after prev, got %d", app.focusedPanel)
+	if app.focusedPanel != PanelSidebar {
+		t.Errorf("expected focus on sidebar after prev, got %d", app.focusedPanel)
+	}
+
+	// Sidebar is the leftmost panel — FocusPrev clamps instead of wrapping
+	// to the rightmost.
+	app.FocusPrev()
+	if app.focusedPanel != PanelSidebar {
+		t.Errorf("expected focus to clamp at sidebar (no wrap), got %d", app.focusedPanel)
 	}
 }
 
