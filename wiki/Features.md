@@ -76,6 +76,13 @@ See [[Terminal Compatibility|Terminal-Compatibility]] for which protocol your te
 - Suppressed when you're focused on the relevant channel
 - Suppressed entirely while you're in DND/snooze
 
+## External commands
+
+- Run a configured program against the selected message with `x` — message text on stdin, metadata (author, channel, permalink, cached image paths) in `SLK_*` env vars
+- Per-command modes: background with a completion toast, captured stdout in an overlay, or interactive (suspends the TUI for an editor / TUI tool)
+- Auto-run on incoming messages that match a mention, substring, or regex (optionally scoped to channels) — e.g. page on a deploy-failure message
+- See [Configuration](Configuration#external-commands)
+
 ## Status & DND
 
 - Set self presence (Active / Away) and DND/snooze from `Ctrl+S`

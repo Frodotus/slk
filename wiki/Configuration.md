@@ -15,6 +15,8 @@ theme = "dracula"
 timestamp_format = "3:04 PM"
 image_protocol = "auto"   # auto | kitty | sixel | halfblock | off
 max_image_rows = 20       # cap inline image height in terminal rows
+panel_borders = true      # draw the box border around each pane;
+                          # false = a thin left accent bar instead
 
 [animations]
 enabled = true
@@ -32,6 +34,8 @@ quiet_hours = "22:00-08:00"   # planned
 message_retention_days = 30
 max_db_size_mb = 500
 max_image_cache_mb = 200
+identity_ttl_days = 7     # re-fetch a user/bot's name + avatar after N days
+                          # so renames and new avatars show up; 0 = never refresh
 
 # Glob-based channel sections — only consulted when use_slack_sections
 # is false (globally or per-workspace), or when Slack's section API is
@@ -79,6 +83,69 @@ accent = "#50C878"
 background = "#1A1A2E"
 text = "#E0E0E0"
 ```
+
+## External commands
+
+Run a program against the selected message with the **`x`** key (pick from a
+list), or automatically when an incoming message matches a trigger.
+
+```toml
+# Manual: select a message, press `x`, pick this command.
+[[external_commands]]
+name = "Create task"
+argv = ["/home/me/bin/slk-task"]   # run directly (no shell)
+
+[[external_commands]]
+name = "OCR image"
+argv = ["tesseract", "-", "-"]
+capture_output = true              # show stdout in an overlay (else a toast)
+
+[[external_commands]]
+name = "Edit in editor"
+argv = ["nvim"]
+interactive = true                 # suspend the TUI and attach the terminal
+confirm = true                     # ask before running
+
+# Auto: runs in the background when an incoming message matches.
+[[external_commands]]
+name = "Notify on mention"
+argv = ["/home/me/bin/notify"]
+on_mention = true                  # fires when you are @-mentioned
+
+[[external_commands]]
+name = "Page on deploy fail"
+argv = ["/home/me/bin/page"]
+match = "deploy failed"            # case-insensitive substring
+# match_regex = "deploy (failed|errored)"   # alternative: RE2 regex
+channels = ["alerts", "ops"]       # optional: only these channel names
+include_self = false               # set true to also fire on your own messages
+```
+
+**How the message reaches the command.** `argv` is executed directly (no
+shell, so no quoting hazards). The message text is piped to **stdin**, and
+metadata is provided via environment variables:
+
+| Variable | Value |
+|----------|-------|
+| `SLK_TEXT` | message text (also on stdin) |
+| `SLK_USER` / `SLK_USER_ID` | author display name / ID |
+| `SLK_TS` | message timestamp |
+| `SLK_CHANNEL` / `SLK_CHANNEL_NAME` | channel ID / name |
+| `SLK_PERMALINK` | archive link (when known) |
+| `SLK_IMAGE_PATHS` | newline-separated on-disk paths of the message's cached images |
+| `SLK_IMAGE_COUNT` | number of image paths |
+
+**Execution flags** (manual or auto): `capture_output` shows stdout in a
+scrollable overlay instead of a completion toast; `interactive` releases the
+terminal to the command (editors / TUI tools) and restores slk on exit;
+`confirm` prompts first. Auto-runs are always in the background (never
+interactive).
+
+**Auto-triggers.** A command with `on_mention`, `match`, and/or `match_regex`
+also runs automatically on incoming messages (across all workspaces and
+channels), firing if **any** of its triggers match. `channels` limits it to
+named channels. Your own messages are skipped unless `include_self = true`. A
+command can be both manual (`x`) and auto.
 
 ## Section resolution
 

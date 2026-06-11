@@ -28,6 +28,7 @@
 | `E` | Normal (message) | Edit your own message |
 | `D` | Normal (message) | Delete your own message (with confirmation) |
 | `U` | Normal (message) | Mark selected message and everything newer as unread |
+| `x` | Normal (message/thread) | Run an external command on the selected message (see [Configuration](Configuration#external-commands)) |
 | `S` | Normal (thread) | Save thread to markdown file (`~/.local/share/slk/exports/` or `$XDG_DATA_HOME/slk/exports/`) |
 | `Y` / `C` | Normal (message) | Copy message permalink |
 | `O` / `v` | Normal (message) | Open full-screen image preview |
