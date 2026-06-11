@@ -512,3 +512,47 @@ func (c channelAdapter) OpenConversation(userIDs []string, requestID uint64) tea
 	}
 	return c.fns.OpenConversation(userIDs, requestID)
 }
+
+// SearchService runs message searches. SearchChannel queries the local
+// FTS cache for one channel; SearchWorkspace queries Slack's
+// search.messages for the active workspace.
+type SearchService interface {
+	// SearchChannel returns a ChannelSearchResultsMsg for query in
+	// channelID's cached history.
+	SearchChannel(channelID ids.ChannelID, query string) tea.Msg
+	// SearchWorkspace returns a WorkspaceSearchResultsMsg for query
+	// across the active workspace (server-side).
+	SearchWorkspace(query string) tea.Msg
+}
+
+// SearchServiceFuncs is the closure bundle accepted by
+// NewSearchService. Any field may be nil; that operation no-ops.
+type SearchServiceFuncs struct {
+	SearchChannel   func(channelID ids.ChannelID, query string) tea.Msg
+	SearchWorkspace func(query string) tea.Msg
+}
+
+// NewSearchService builds a SearchService from a SearchServiceFuncs
+// bundle. Used by cmd/slk/main.go (production wiring) and tests.
+func NewSearchService(fns SearchServiceFuncs) SearchService { return searchAdapter{fns: fns} }
+
+// noopSearchService is the default SearchService wired into App by
+// NewApp so call sites can dispatch without nil-checks even when
+// SetSearchService hasn't been called.
+var noopSearchService SearchService = searchAdapter{}
+
+type searchAdapter struct{ fns SearchServiceFuncs }
+
+func (s searchAdapter) SearchChannel(channelID ids.ChannelID, query string) tea.Msg {
+	if s.fns.SearchChannel == nil {
+		return nil
+	}
+	return s.fns.SearchChannel(channelID, query)
+}
+
+func (s searchAdapter) SearchWorkspace(query string) tea.Msg {
+	if s.fns.SearchWorkspace == nil {
+		return nil
+	}
+	return s.fns.SearchWorkspace(query)
+}

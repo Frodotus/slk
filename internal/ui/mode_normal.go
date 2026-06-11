@@ -55,12 +55,35 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 		return a.compose.Focus()
 
 	case key.Matches(msg, a.keys.Escape):
+		// An active `/` search absorbs the first Esc: clear it and
+		// stop, leaving thread panels / edits untouched.
+		if a.search != nil {
+			a.clearActiveSearch()
+			return nil
+		}
 		a.cancelEdit()
 		a.SetMode(ModeNormal)
 		a.compose.Blur()
 		if a.threadVisible {
 			a.CloseThread()
 		}
+
+	case key.Matches(msg, a.keys.SearchMode):
+		// Spec scopes `/` to the channel message pane in v1: no-op
+		// while the thread panel has focus.
+		if a.focusedPanel == PanelThread {
+			return nil
+		}
+		a.searchInput = ""
+		a.statusbar.SetSearch("/")
+		a.SetMode(ModeSearch)
+		return nil
+
+	case msg.String() == "n" && a.search != nil:
+		return a.searchNext()
+
+	case msg.String() == "N" && a.search != nil:
+		return a.searchPrev()
 
 	case key.Matches(msg, a.keys.Tab):
 		a.FocusNext()

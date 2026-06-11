@@ -88,6 +88,16 @@ type (
 		Messages  []messages.MessageItem // ascending by TS, like MessagesLoadedMsg
 		Err       error
 	}
+	// ChannelSearchResultsMsg delivers in-channel FTS results for the `/`
+	// search. TSes are match timestamps newest-first; Terms are the folded
+	// query terms for highlighting. Empty TSes = no matches.
+	ChannelSearchResultsMsg struct {
+		ChannelID string
+		Query     string
+		Terms     []string
+		TSes      []string
+		Err       error
+	}
 	NewMessageMsg struct {
 		ChannelID string
 		Message   messages.MessageItem

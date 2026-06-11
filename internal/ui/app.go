@@ -250,6 +250,12 @@ type App struct {
 	// reducer_links.go.
 	pendingLinkNav *pendingLinkNav
 
+	// search is the active in-channel search (nil = none).
+	// searchInput is the prompt buffer while in ModeSearch.
+	search      *activeSearch
+	searchInput string
+	searchSvc   SearchService
+
 	// browserOpener launches a URL in the OS browser. Defaults to
 	// openURLCmd; tests inject fakes.
 	browserOpener func(url string) tea.Cmd
@@ -417,6 +423,7 @@ func NewApp() *App {
 		threads:              noopThreadService,
 		messageSvc:           noopMessageService,
 		channels:             noopChannelService,
+		searchSvc:            noopSearchService,
 		lastChannelByTeam:    map[string]string{},
 		workspaceDomains:     map[string]string{},
 		browserOpener:        openURLCmd,
@@ -488,6 +495,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		reduceSend,
 		reduceChannels,
 		reduceLinks,
+		reduceSearch,
 		reduceWorkspace,
 		reduceNewMessagePicker,
 		reduceIO,
@@ -1705,6 +1713,27 @@ func (a *App) SetChannelService(s ChannelService) {
 		s = noopChannelService
 	}
 	a.channels = s
+}
+
+// SetSearchService injects the search backend (wired by cmd/slk).
+// Build one via NewSearchService from a SearchServiceFuncs bundle.
+func (a *App) SetSearchService(s SearchService) {
+	if s == nil {
+		s = noopSearchService
+	}
+	a.searchSvc = s
+}
+
+// clearActiveSearch removes in-channel search state: highlights,
+// status segment, prompt buffer.
+func (a *App) clearActiveSearch() {
+	if a.search == nil && a.searchInput == "" {
+		return
+	}
+	a.search = nil
+	a.searchInput = ""
+	a.messagepane.SetSearchTerms(nil)
+	a.statusbar.SetSearch("")
 }
 
 // SetMessageService wires the App's MessageService collaborator

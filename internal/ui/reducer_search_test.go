@@ -1,0 +1,165 @@
+// internal/ui/reducer_search_test.go
+//
+// Tests for the in-channel `/` search: the ChannelSearchResultsMsg
+// reducer (jump-to-nearest, stale-drop, no-match, off-buffer fetch),
+// n/N navigation with wrap, Esc clearing, and the ModeSearch prompt
+// (enter/cancel) flow.
+package ui
+
+import (
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/gammons/slk/internal/ids"
+	"github.com/gammons/slk/internal/ui/messages"
+)
+
+func searchTestApp(t *testing.T) *App {
+	t.Helper()
+	app := NewApp()
+	app.activeChannelID = "C1"
+	app.messagepane.SetMessages([]messages.MessageItem{
+		{TS: "1700000001.000000", Text: "deploy went fine"},
+		{TS: "1700000002.000000", Text: "lunch?"},
+		{TS: "1700000003.000000", Text: "deployment failed"},
+	})
+	return app
+}
+
+func resultsMsg(tses ...string) ChannelSearchResultsMsg {
+	return ChannelSearchResultsMsg{
+		ChannelID: "C1",
+		Query:     "deploy",
+		Terms:     []string{"deploy"},
+		TSes:      tses, // newest first
+	}
+}
+
+func TestSearchResults_JumpsToNearestAtOrOlderThanCursor(t *testing.T) {
+	app := searchTestApp(t)
+	app.messagepane.SelectByTS("1700000002.000000") // cursor between the two matches
+
+	app.Update(resultsMsg("1700000003.000000", "1700000001.000000"))
+
+	sel, _ := app.messagepane.SelectedMessage()
+	if sel.TS != "1700000001.000000" {
+		t.Fatalf("selected %s, want nearest at-or-older match", sel.TS)
+	}
+	if app.search == nil || app.search.idx != 1 {
+		t.Fatalf("active search idx = %+v", app.search)
+	}
+}
+
+func TestSearchResults_NoMatchesSetsStatusAndNoState(t *testing.T) {
+	app := searchTestApp(t)
+	app.Update(ChannelSearchResultsMsg{ChannelID: "C1", Query: "zzz"})
+	if app.search != nil {
+		t.Fatal("no-match search should not leave active state")
+	}
+}
+
+func TestSearchResults_StaleChannelDropped(t *testing.T) {
+	app := searchTestApp(t)
+	app.Update(ChannelSearchResultsMsg{ChannelID: "C9", Query: "deploy", TSes: []string{"1.0"}})
+	if app.search != nil {
+		t.Fatal("stale channel results applied")
+	}
+}
+
+func TestSearchNextPrev_WrapAndNavigate(t *testing.T) {
+	app := searchTestApp(t)
+	app.Update(resultsMsg("1700000003.000000", "1700000001.000000"))
+	// jumped to newest match (cursor starts at bottom) -> idx 0
+
+	app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"}) // older
+	sel, _ := app.messagepane.SelectedMessage()
+	if sel.TS != "1700000001.000000" {
+		t.Fatalf("n: selected %s", sel.TS)
+	}
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"}) // wrap to newest
+	sel, _ = app.messagepane.SelectedMessage()
+	if sel.TS != "1700000003.000000" {
+		t.Fatalf("n wrap: selected %s", sel.TS)
+	}
+	wrapped := false
+	for _, m := range drainCmd(cmd) {
+		if tm, ok := m.(ToastMsg); ok && tm.Text == "Search wrapped" {
+			wrapped = true
+		}
+	}
+	if !wrapped {
+		t.Fatal("expected 'Search wrapped' toast")
+	}
+
+	app.Update(tea.KeyPressMsg{Code: 'N', Text: "N"}) // newer wraps to oldest
+	sel, _ = app.messagepane.SelectedMessage()
+	if sel.TS != "1700000001.000000" {
+		t.Fatalf("N wrap: selected %s", sel.TS)
+	}
+}
+
+func TestSearchEscClears(t *testing.T) {
+	app := searchTestApp(t)
+	app.Update(resultsMsg("1700000003.000000"))
+	if app.search == nil {
+		t.Fatal("precondition: active search")
+	}
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if app.search != nil {
+		t.Fatal("Esc did not clear active search")
+	}
+}
+
+func TestSearchOffBufferMatchTriggersFetchAround(t *testing.T) {
+	app := searchTestApp(t)
+	var fetchedTS string
+	setChannelFetchAroundForTest(app, func(channelID ids.ChannelID, ts ids.MessageTS) tea.Msg {
+		fetchedTS = string(ts)
+		return nil
+	})
+	// Match older than anything in the buffer.
+	_, cmd := app.Update(resultsMsg("1600000000.000000"))
+	drainCmd(cmd)
+	if fetchedTS != "1600000000.000000" {
+		t.Fatalf("FetchAround not dispatched for off-buffer match (got %q)", fetchedTS)
+	}
+}
+
+func TestSlashEntersSearchModeAndEnterExecutes(t *testing.T) {
+	app := searchTestApp(t)
+	var gotChannel, gotQuery string
+	app.SetSearchService(NewSearchService(SearchServiceFuncs{
+		SearchChannel: func(channelID ids.ChannelID, query string) tea.Msg {
+			gotChannel, gotQuery = string(channelID), query
+			return nil
+		},
+	}))
+
+	app.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	if app.mode != ModeSearch {
+		t.Fatalf("mode = %v, want ModeSearch", app.mode)
+	}
+	for _, r := range "deploy" {
+		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	drainCmd(cmd)
+
+	if app.mode != ModeNormal {
+		t.Fatalf("mode after Enter = %v", app.mode)
+	}
+	if gotChannel != "C1" || gotQuery != "deploy" {
+		t.Fatalf("SearchChannel(%q, %q)", gotChannel, gotQuery)
+	}
+}
+
+func TestSearchModeEscCancels(t *testing.T) {
+	app := searchTestApp(t)
+	app.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if app.mode != ModeNormal || app.searchInput != "" {
+		t.Fatalf("Esc: mode=%v input=%q", app.mode, app.searchInput)
+	}
+}

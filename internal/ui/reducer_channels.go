@@ -258,6 +258,9 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) (tea.Cmd, bool) {
 	// Close thread panel when switching channels.
 	a.CloseThread()
 	a.clearSelections()
+	// Search state is per-channel: drop highlights, match list, and
+	// the status-line segment on every switch.
+	a.clearActiveSearch()
 	// Move focus to the messages pane so the user can immediately
 	// j/k through messages, react, open threads, etc. without first
 	// having to Tab/h-l out of the sidebar after picking a channel.

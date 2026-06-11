@@ -30,6 +30,7 @@ import (
 	slackclient "github.com/gammons/slk/internal/slack"
 	"github.com/gammons/slk/internal/slack/membership"
 	"github.com/gammons/slk/internal/slackhttp"
+	"github.com/gammons/slk/internal/text"
 	"github.com/gammons/slk/internal/ui"
 	"github.com/gammons/slk/internal/ui/channelfinder"
 	"github.com/gammons/slk/internal/ui/compose"
@@ -1082,6 +1083,29 @@ func run() error {
 				}
 				return ui.ChannelJoinedMsg{ID: chIDStr, Name: channelName}
 			},
+		}))
+
+		app.SetSearchService(ui.NewSearchService(ui.SearchServiceFuncs{
+			SearchChannel: func(channelID ids.ChannelID, query string) tea.Msg {
+				wctx := router.Active()
+				if wctx == nil {
+					return nil
+				}
+				terms := strings.Fields(query)
+				folded := make([]string, 0, len(terms))
+				for _, t := range terms {
+					folded = append(folded, text.Fold(t))
+				}
+				tses, err := db.SearchChannelMessages(string(channelID), wctx.Client.TeamID(), query)
+				return ui.ChannelSearchResultsMsg{
+					ChannelID: string(channelID),
+					Query:     query,
+					Terms:     folded,
+					TSes:      tses,
+					Err:       err,
+				}
+			},
+			// SearchWorkspace wired in Task 10.
 		}))
 
 		app.SetMessageService(ui.NewMessageService(ui.MessageServiceFuncs{
