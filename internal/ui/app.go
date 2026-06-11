@@ -147,6 +147,12 @@ type App struct {
 	// clipboard.Init(). When false, Ctrl+V smart-paste is a no-op.
 	clipboardAvailable bool
 
+	// keepFocusOnList, when true, keeps keyboard focus on the list
+	// (sidebar / threads list / message list) after selecting a channel
+	// or opening a thread, rather than moving focus into the content
+	// pane. Opt-in browse aid; see config [general] keep_focus_on_list.
+	keepFocusOnList bool
+
 	// clipboardRead is the function used by smartPaste to read OS
 	// clipboard contents. Tests inject fakes via SetClipboardReader.
 	clipboardRead clipboardReader
@@ -1330,9 +1336,10 @@ func (a *App) handleEnter() tea.Cmd {
 	// messagepane.SelectedMessage() and opens whatever was highlighted
 	// in the underlying channel. Enter also shifts keyboard focus to
 	// the thread pane (mirroring the channel-pane Enter semantics:
-	// "enter this thread to interact with it"), distinguishing it
-	// from the j/k navigation which preserves PanelMessages focus so
-	// the user can keep walking the list.
+	// "enter this thread to interact with it") — unless
+	// keep_focus_on_list is set, which keeps focus on the threads list.
+	// Either way this is distinct from j/k navigation, which always
+	// preserves PanelMessages focus so the user can keep walking the list.
 	if a.focusedPanel == PanelMessages && a.view == ViewThreads {
 		if _, ok := a.threadsView.SelectedSummary(); !ok {
 			return nil
@@ -1341,11 +1348,14 @@ func (a *App) handleEnter() tea.Cmd {
 		// otherwise dedup (because j/k or activation already loaded
 		// this thread): the user explicitly asked to enter it. We
 		// reset the dedup keys so the helper runs its full open
-		// path, then re-set focus to the thread pane.
+		// path, then move focus to the thread pane (unless
+		// keep_focus_on_list keeps it on the threads list).
 		a.lastOpenedChannelID = ""
 		a.lastOpenedThreadTS = ""
 		cmd := a.openSelectedThreadCmd(false)
-		a.focusedPanel = PanelThread
+		if !a.keepFocusOnList {
+			a.focusedPanel = PanelThread
+		}
 		return cmd
 	}
 
@@ -1383,7 +1393,9 @@ func (a *App) openThreadForSelectedMessage() tea.Cmd {
 func (a *App) openThreadPanel(parent messages.MessageItem, channelID, threadTS string) tea.Cmd {
 	a.threadVisible = true
 	a.statusbar.SetInThread(true)
-	a.focusedPanel = PanelThread
+	if !a.keepFocusOnList {
+		a.focusedPanel = PanelThread
+	}
 	a.threadPanel.SetThread(parent, nil, channelID, threadTS)
 	a.threadCompose.SetChannel("thread")
 	a.applyThreadUnreadBoundary(channelID)
@@ -1728,6 +1740,13 @@ func (a *App) SetUploader(fn UploadFunc) {
 // is short-circuited.
 func (a *App) SetClipboardAvailable(ok bool) {
 	a.clipboardAvailable = ok
+}
+
+// SetKeepFocusOnList toggles the browse-friendly mode where selecting a
+// channel or opening a thread loads the content but leaves keyboard
+// focus on the list. See config [general] keep_focus_on_list.
+func (a *App) SetKeepFocusOnList(v bool) {
+	a.keepFocusOnList = v
 }
 
 // SetClipboardReader replaces the clipboard read function. Used by

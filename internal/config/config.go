@@ -67,6 +67,12 @@ type General struct {
 	// instead of the config-glob [sections.*] system. Pointer so we
 	// can distinguish "unset" (default true) from explicit false.
 	UseSlackSections *bool `toml:"use_slack_sections"`
+	// KeepFocusOnList keeps keyboard focus on the list when you select a
+	// channel or open a thread, instead of moving focus into the content
+	// pane. Lets you browse with j/k + Enter without tabbing back to the
+	// list each time; step into the content with Tab / l / →. Default
+	// false (focus follows selection — the long-standing behavior).
+	KeepFocusOnList bool `toml:"keep_focus_on_list"`
 }
 
 type Appearance struct {

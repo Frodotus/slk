@@ -225,7 +225,11 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) (tea.Cmd, bool) {
 	// Move focus to the messages pane so the user can immediately
 	// j/k through messages, react, open threads, etc. without first
 	// having to Tab/h-l out of the sidebar after picking a channel.
-	a.focusedPanel = PanelMessages
+	// With keep_focus_on_list set, focus stays on the sidebar so the
+	// user can keep browsing channels with j/k + Enter.
+	if !a.keepFocusOnList {
+		a.focusedPanel = PanelMessages
+	}
 	a.activeChannelID = m.ID
 	a.typingOut.ResetThrottle() // reset typing throttle for new channel
 	// Update local finder ordering immediately so the next Ctrl+T
