@@ -1433,16 +1433,15 @@ func (a *App) clearSelections() {
 	a.threadPanel.ClearSelection()
 }
 
+// FocusNext moves focus one panel to the right (Sidebar -> Messages ->
+// Thread). It clamps at the rightmost panel rather than wrapping back to
+// the leftmost.
 func (a *App) FocusNext() {
 	a.cancelEdit()
 	a.clearSelections()
 	if !a.sidebarVisible {
-		if a.threadVisible {
-			if a.focusedPanel == PanelMessages {
-				a.focusedPanel = PanelThread
-			} else {
-				a.focusedPanel = PanelMessages
-			}
+		if a.threadVisible && a.focusedPanel == PanelMessages {
+			a.focusedPanel = PanelThread
 		}
 		return
 	}
@@ -1452,34 +1451,28 @@ func (a *App) FocusNext() {
 	case PanelMessages:
 		if a.threadVisible {
 			a.focusedPanel = PanelThread
-		} else {
-			a.focusedPanel = PanelSidebar
 		}
+		// no thread open: Messages is rightmost, stay put
 	case PanelThread:
-		a.focusedPanel = PanelSidebar
+		// rightmost, stay put
 	}
 }
 
+// FocusPrev moves focus one panel to the left (Thread -> Messages ->
+// Sidebar). It clamps at the leftmost panel rather than wrapping to the
+// rightmost.
 func (a *App) FocusPrev() {
 	a.cancelEdit()
 	a.clearSelections()
 	if !a.sidebarVisible {
-		if a.threadVisible {
-			if a.focusedPanel == PanelThread {
-				a.focusedPanel = PanelMessages
-			} else {
-				a.focusedPanel = PanelThread
-			}
+		if a.threadVisible && a.focusedPanel == PanelThread {
+			a.focusedPanel = PanelMessages
 		}
 		return
 	}
 	switch a.focusedPanel {
 	case PanelSidebar:
-		if a.threadVisible {
-			a.focusedPanel = PanelThread
-		} else {
-			a.focusedPanel = PanelMessages
-		}
+		// leftmost, stay put
 	case PanelMessages:
 		a.focusedPanel = PanelSidebar
 	case PanelThread:
