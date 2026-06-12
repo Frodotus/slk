@@ -1,10 +1,5 @@
 # slk
 
-> **A blazingly fast Slack TUI.**
-> Keyboard-driven, beautifully themed, and under 20MB. One static binary. No Electron required.
->
-> Marketing site: [getslk.sh](https://getslk.sh) · Docs: [Wiki](https://github.com/gammons/slk/wiki)
-
 ![slk screenshot](docs/assets/screenshot.png)
 
 `slk` is a daily-driver replacement for the official Slack desktop client, built in Go with [bubbletea](https://github.com/charmbracelet/bubbletea) and [lipgloss](https://github.com/charmbracelet/lipgloss).
@@ -31,28 +26,28 @@
 - OS desktop notifications on DMs, mentions, and configurable keywords
 - External commands: run a program on a message (text + images), manually (`x`) or auto-triggered on a mention / keyword / regex
 
-Full feature breakdown: **[[Features|https://github.com/gammons/slk/wiki/Features]]**
+Full feature breakdown: **[[Features|https://github.com/frodotus/slk/wiki/Features]]**
 
 ## Quick install
 
 **Homebrew** (macOS and Linux):
 
 ```bash
-brew install gammons/tap/slk
+brew install frodotus/tap/slk
 ```
 
 **Linux/macOS tarball** (auto-resolves the latest version):
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+VERSION=$(curl -fsSL https://api.github.com/repos/frodotus/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
 # Linux x86_64
-curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_x86_64.tar.gz" | tar xz
+curl -fsSL "https://github.com/frodotus/slk/releases/latest/download/slk_${VERSION}_linux_x86_64.tar.gz" | tar xz
 # macOS Apple Silicon
-curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_darwin_arm64.tar.gz" | tar xz
+curl -fsSL "https://github.com/frodotus/slk/releases/latest/download/slk_${VERSION}_darwin_arm64.tar.gz" | tar xz
 sudo mv slk /usr/local/bin/
 ```
 
-For `.deb` / `.rpm` / `.apk` packages, Windows, build-from-source, and checksums, see the [Installation wiki page](https://github.com/gammons/slk/wiki/Installation).
+For `.deb` / `.rpm` / `.apk` packages, Windows, build-from-source, and checksums, see the [Installation wiki page](https://github.com/frodotus/slk/wiki/Installation).
 
 ## Setup
 
@@ -63,7 +58,7 @@ cookie from DevTools, then:
 slk --add-workspace
 ```
 
-Full walkthrough: [Setup wiki page](https://github.com/gammons/slk/wiki/Setup).
+Full walkthrough: [Setup wiki page](https://github.com/frodotus/slk/wiki/Setup).
 
 ## Enterprise Grid
 
@@ -157,17 +152,17 @@ the file before relaunching. Log lines are categorized
 
 ## Documentation
 
-Everything lives in the [**wiki**](https://github.com/gammons/slk/wiki):
+Everything lives in the [**wiki**](https://github.com/frodotus/slk/wiki):
 
-- [Installation](https://github.com/gammons/slk/wiki/Installation) — prebuilt binaries, Go install, build from source
-- [Setup](https://github.com/gammons/slk/wiki/Setup) — token extraction, adding workspaces
-- [Features](https://github.com/gammons/slk/wiki/Features) — full feature breakdown
-- [Keybindings](https://github.com/gammons/slk/wiki/Keybindings) — every key, every mode
-- [Configuration](https://github.com/gammons/slk/wiki/Configuration) — `config.toml`, custom themes, XDG paths
-- [Terminal Compatibility](https://github.com/gammons/slk/wiki/Terminal-Compatibility) — what each terminal supports
-- [Clipboard and OSC 52](https://github.com/gammons/slk/wiki/Clipboard-and-OSC-52) — copy/paste setup notes
-- [Tradeoffs and Non-Goals](https://github.com/gammons/slk/wiki/Tradeoffs-and-Non-Goals) — roadmap, caveats, TOS notice
-- [Architecture](https://github.com/gammons/slk/wiki/Architecture) — service layout, data layer
+- [Installation](https://github.com/frodotus/slk/wiki/Installation) — prebuilt binaries, Go install, build from source
+- [Setup](https://github.com/frodotus/slk/wiki/Setup) — token extraction, adding workspaces
+- [Features](https://github.com/frodotus/slk/wiki/Features) — full feature breakdown
+- [Keybindings](https://github.com/frodotus/slk/wiki/Keybindings) — every key, every mode
+- [Configuration](https://github.com/frodotus/slk/wiki/Configuration) — `config.toml`, custom themes, XDG paths
+- [Terminal Compatibility](https://github.com/frodotus/slk/wiki/Terminal-Compatibility) — what each terminal supports
+- [Clipboard and OSC 52](https://github.com/frodotus/slk/wiki/Clipboard-and-OSC-52) — copy/paste setup notes
+- [Tradeoffs and Non-Goals](https://github.com/frodotus/slk/wiki/Tradeoffs-and-Non-Goals) — roadmap, caveats, TOS notice
+- [Architecture](https://github.com/frodotus/slk/wiki/Architecture) — service layout, data layer
 
 ## Contributing
 
@@ -194,7 +189,7 @@ Contributions are welcome. A few ground rules:
 
 `slk` is an independent, unofficial project. It is not affiliated with, endorsed by, or sponsored by Slack Technologies, LLC or Salesforce, Inc. "Slack" is a trademark of Slack Technologies, LLC; it is used here only to describe the service this client interoperates with.
 
-slk talks to Slack via the same internal browser protocol the official web client uses. This is unofficial and not sanctioned by Slack — see [Tradeoffs and Non-Goals](https://github.com/gammons/slk/wiki/Tradeoffs-and-Non-Goals#unofficial--tos-caveat) for details.
+slk talks to Slack via the same internal browser protocol the official web client uses. This is unofficial and not sanctioned by Slack — see [Tradeoffs and Non-Goals](https://github.com/frodotus/slk/wiki/Tradeoffs-and-Non-Goals#unofficial--tos-caveat) for details.
 
 ## License
 
