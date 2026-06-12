@@ -1,6 +1,6 @@
 # Installation
 
-Grab a prebuilt binary from the [latest release](https://github.com/gammons/slk/releases/latest), or use one of the methods below.
+Grab a prebuilt binary from the [latest release](https://github.com/Frodotus/slk/releases/latest), or use one of the methods below.
 
 The shell snippets resolve the latest version automatically.
 
@@ -9,23 +9,23 @@ The shell snippets resolve the latest version automatically.
 ### Debian / Ubuntu
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-curl -fsSLO "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_amd64.deb"
+VERSION=$(curl -fsSL https://api.github.com/repos/Frodotus/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+curl -fsSLO "https://github.com/Frodotus/slk/releases/latest/download/slk_${VERSION}_linux_amd64.deb"
 sudo dpkg -i "slk_${VERSION}_linux_amd64.deb"
 ```
 
 ### Fedora / RHEL
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-sudo rpm -i "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_amd64.rpm"
+VERSION=$(curl -fsSL https://api.github.com/repos/Frodotus/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+sudo rpm -i "https://github.com/Frodotus/slk/releases/latest/download/slk_${VERSION}_linux_amd64.rpm"
 ```
 
 ### Alpine
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-curl -fsSLO "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_amd64.apk"
+VERSION=$(curl -fsSL https://api.github.com/repos/Frodotus/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+curl -fsSLO "https://github.com/Frodotus/slk/releases/latest/download/slk_${VERSION}_linux_amd64.apk"
 sudo apk add --allow-untrusted "slk_${VERSION}_linux_amd64.apk"
 ```
 
@@ -34,26 +34,26 @@ sudo apk add --allow-untrusted "slk_${VERSION}_linux_amd64.apk"
 Swap `x86_64` for `arm64` on ARM:
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_x86_64.tar.gz" | tar xz
+VERSION=$(curl -fsSL https://api.github.com/repos/Frodotus/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+curl -fsSL "https://github.com/Frodotus/slk/releases/latest/download/slk_${VERSION}_linux_x86_64.tar.gz" | tar xz
 sudo mv slk /usr/local/bin/
 ```
 
 ## macOS
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+VERSION=$(curl -fsSL https://api.github.com/repos/Frodotus/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
 # Apple Silicon
-curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_darwin_arm64.tar.gz" | tar xz
+curl -fsSL "https://github.com/Frodotus/slk/releases/latest/download/slk_${VERSION}_darwin_arm64.tar.gz" | tar xz
 # Intel
-curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_darwin_x86_64.tar.gz" | tar xz
+curl -fsSL "https://github.com/Frodotus/slk/releases/latest/download/slk_${VERSION}_darwin_x86_64.tar.gz" | tar xz
 
 sudo mv slk /usr/local/bin/
 ```
 
 ## Windows
 
-Download the `windows_x86_64.zip` from the [latest release](https://github.com/gammons/slk/releases/latest), extract `slk.exe`, and add it to your `PATH`.
+Download the `windows_x86_64.zip` from the [latest release](https://github.com/Frodotus/slk/releases/latest), extract `slk.exe`, and add it to your `PATH`.
 
 ## Build from source
 
@@ -84,7 +84,7 @@ make build       # binary at bin/slk
 ## Verify your download
 
 ```bash
-curl -fsSLO https://github.com/gammons/slk/releases/latest/download/checksums.txt
+curl -fsSLO https://github.com/Frodotus/slk/releases/latest/download/checksums.txt
 sha256sum -c checksums.txt --ignore-missing
 ```
 
