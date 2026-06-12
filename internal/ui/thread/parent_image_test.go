@@ -6,7 +6,6 @@ import (
 	stdimage "image"
 	imgcolor "image/color"
 	imgpng "image/png"
-	"strings"
 	"testing"
 
 	imgpkg "github.com/gammons/slk/internal/image"
@@ -82,7 +81,7 @@ func TestView_ParentImageEmitsKittyUpload(t *testing.T) {
 	imgpkg.KittyOutput = &buf
 
 	_ = m.View(40, 80) // (height, width)
-	if !strings.Contains(buf.String(), "\x1b_G") {
+	if !bytes.Contains(buf.Bytes(), []byte("\x1b_G")) {
 		t.Errorf("parent image did not emit a kitty upload escape (\\x1b_G); got %d bytes (issue #4 — parent flushes discarded)", buf.Len())
 	}
 }
