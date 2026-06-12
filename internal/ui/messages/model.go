@@ -232,6 +232,12 @@ type Model struct {
 	userNames    map[string]string // user ID -> display name for mention resolution
 	channelNames map[string]string // channel ID -> name for bare <#CID> resolution
 
+	// groupWithin is the author-grouping window in minutes. When > 0, a
+	// message from the same author as the one above it within this many
+	// minutes renders as a collapsed continuation (no repeated
+	// avatar/name/timestamp). 0 disables grouping. See ContinuesGroup.
+	groupWithin int
+
 	// searchTerms are folded word-prefix terms of the active in-channel
 	// search; non-empty enables highlight rendering. nil = no search.
 	searchTerms []string
@@ -645,6 +651,45 @@ func (m *Model) SetSearchTerms(terms []string) {
 	m.searchTerms = slices.Clone(terms)
 	m.InvalidateCache()
 	m.dirty()
+}
+
+// SetGroupWithinMinutes sets the author-grouping window (minutes). Messages
+// from the same author within this many minutes of the previous message
+// render as collapsed continuations. 0 disables grouping. A change
+// invalidates the render cache.
+func (m *Model) SetGroupWithinMinutes(minutes int) {
+	if minutes < 0 {
+		minutes = 0
+	}
+	if m.groupWithin == minutes {
+		return
+	}
+	m.groupWithin = minutes
+	m.InvalidateCache()
+	m.dirty()
+}
+
+// isContinuation reports whether m.messages[i] renders collapsed under
+// m.messages[i-1] as a same-author continuation. It applies the same break
+// rules buildCache uses for separators: a date change (handled inside
+// ContinuesGroup) or the "── new ──" unread landmark between the two
+// messages forces a full header.
+func (m *Model) isContinuation(i int) bool {
+	if i <= 0 || m.groupWithin <= 0 {
+		return false
+	}
+	prev := m.messages[i-1]
+	cur := m.messages[i]
+	if !ContinuesGroup(prev, cur, m.groupWithin) {
+		return false
+	}
+	// The "── new ──" landmark is inserted before the first message with
+	// TS > lastReadTS; if it sits between prev and cur they're visually
+	// separated, so cur keeps its header.
+	if m.lastReadTS != "" && prev.TS <= m.lastReadTS && cur.TS > m.lastReadTS {
+		return false
+	}
+	return true
 }
 
 func (m *Model) SetMessages(msgs []MessageItem) {
@@ -1569,7 +1614,8 @@ func (m *Model) renderMessageEntry(i int, width int, cs cacheStyles, stats *entr
 	if m.avatarFn != nil {
 		avatarStr = m.avatarFn(msg.UserID)
 	}
-	rendered, attachFlushes, attachSixel, attachHits, reactHits := m.renderMessagePlain(msg, width, avatarStr, m.userNames, m.channelNames, i == m.selected, stats)
+	continuation := m.isContinuation(i)
+	rendered, attachFlushes, attachSixel, attachHits, reactHits := m.renderMessagePlain(msg, width, avatarStr, m.userNames, m.channelNames, i == m.selected, continuation, stats)
 	// Two filled variants: borderFill (Background) for the unselected
 	// pre-render, and the SelectionTintColor for the selected pre-render.
 	// Without per-variant fills, the trailing whitespace of every wrapped
@@ -1866,7 +1912,7 @@ func (m *Model) blockkitContext(msg MessageItem, userNames, channelNames map[str
 // columns within linesNormal, including the border (col 0) and the
 // avatar gutter (5 cols when an avatar is present), so View() can
 // translate directly to pane-local mouse columns.
-func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string, userNames map[string]string, channelNames map[string]string, isSelected bool, stats *entryPerfStats) (
+func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string, userNames map[string]string, channelNames map[string]string, isSelected bool, continuation bool, stats *entryPerfStats) (
 	content string, flushes []func(io.Writer) error, sixelRows map[int]sixelEntry, hits []entryHit, reactionHits []reactionEntryHit,
 ) {
 	line := styles.Username.Render(msg.UserName) + lipgloss.NewStyle().Background(styles.Background).Render("  ") + styles.Timestamp.Render(msg.Timestamp)
@@ -2076,11 +2122,27 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 		editedMark = " " + styles.Timestamp.Render("(edited)")
 	}
 
+	// Author grouping: a continuation message (same author as the message
+	// above, within the configured window) omits the username/timestamp
+	// header row entirely. The "(edited)" marker normally rides that header,
+	// so on a continuation it is appended to the body instead (no extra
+	// row). ContinuesGroup guarantees a continuation has an empty Subtype,
+	// so broadcastLabel below is never set for one.
+	header := line + editedMark + "\n"
+	headerRows := 1 // username + ts row
+	if continuation {
+		header = ""
+		headerRows = 0
+		if editedMark != "" {
+			text += editedMark
+		}
+	}
+
 	// Pre-attachment row count, so attachment rows can compute their
 	// absolute row index (used as the sixelRows key).
 	//
 	//   row 0: broadcastLabel (only when subtype=thread_broadcast)
-	//   row 0|1: username line + editedMark
+	//   row 0|1: username line + editedMark (omitted on a continuation)
 	//   row N: wrapped body text (lipgloss.Height of styled `text`)
 	//
 	// Attachments begin immediately after the body text.
@@ -2090,7 +2152,7 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 		broadcastLabel = styles.Timestamp.Render("\u21b3 replied to a thread") + "\n"
 		preAttachmentRows++ // the broadcast label occupies its own row
 	}
-	preAttachmentRows++                        // username + ts row
+	preAttachmentRows += headerRows            // username + ts row (0 on continuation)
 	preAttachmentRows += lipgloss.Height(text) // wrapped body text
 
 	// contentColBase is the display column at which message content
@@ -2254,7 +2316,7 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 		attachmentLineCount = len(flat)
 	}
 
-	msgContent := broadcastLabel + line + editedMark + "\n" + text + bkBlock + attachmentLines + threadLine + reactionLine
+	msgContent := broadcastLabel + header + text + bkBlock + attachmentLines + threadLine + reactionLine
 
 	// Translate per-pill specs into entry-relative reaction hit rects.
 	// reactionRowBase is the row index (within linesNormal) where the
@@ -2281,9 +2343,16 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 	}
 
 	// Place avatar next to message content (avatar is side-by-side, no
-	// extra rows; row indices for sixelRows remain valid).
+	// extra rows; row indices for sixelRows remain valid). A continuation
+	// reserves the same 4-col gutter but draws no avatar, so its body stays
+	// aligned under the group leader (contentColBase already accounts for
+	// the gutter whenever avatars are active).
 	if avatarStr != "" {
-		msgContent = placeAvatarBeside(avatarStr, msgContent)
+		if continuation {
+			msgContent = placeAvatarBeside(BlankAvatarGutter(), msgContent)
+		} else {
+			msgContent = placeAvatarBeside(avatarStr, msgContent)
+		}
 	}
 
 	if len(allSixel) == 0 {
@@ -2304,6 +2373,15 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 // 4-col-wide, 2-row-tall left-gutter layout used by the messages pane.
 func PlaceAvatarBeside(avatar, content string) string {
 	return placeAvatarBeside(avatar, content)
+}
+
+// BlankAvatarGutter returns a single 4-col, background-painted blank used in
+// place of an avatar for a grouped continuation message. placeAvatarBeside
+// adds the trailing 1-col gap and pads further rows, yielding the same 5-col
+// gutter a real avatar occupies — so continuation bodies stay aligned. Used
+// by both the message pane and the thread reply list.
+func BlankAvatarGutter() string {
+	return lipgloss.NewStyle().Background(styles.Background).Width(4).Render("")
 }
 
 // placeAvatarBeside renders the avatar to the left of the message content.

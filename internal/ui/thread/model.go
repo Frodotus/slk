@@ -89,15 +89,19 @@ type reactionHitRect struct {
 // Model represents the thread panel UI component.
 // It displays a parent message and its replies with cursor navigation.
 type Model struct {
-	parent            messages.MessageItem
-	replies           []messages.MessageItem
-	channelID         string
-	threadTS          string
-	selected          int
-	focused           bool
-	avatarFn          messages.AvatarFunc
-	userNames         map[string]string
-	channelNames      map[string]string
+	parent       messages.MessageItem
+	replies      []messages.MessageItem
+	channelID    string
+	threadTS     string
+	selected     int
+	focused      bool
+	avatarFn     messages.AvatarFunc
+	userNames    map[string]string
+	channelNames map[string]string
+	// groupWithin is the author-grouping window in minutes (0 = off);
+	// consecutive same-author replies within it collapse. See
+	// messages.ContinuesGroup.
+	groupWithin       int
 	vp                viewport.Model
 	reactionNavActive bool
 	reactionNavIndex  int
@@ -336,6 +340,40 @@ func (m *Model) SetUnreadBoundary(ts string) {
 // UnreadBoundaryTS returns the current unread-boundary ts. Used by tests.
 func (m *Model) UnreadBoundaryTS() string {
 	return m.unreadBoundaryTS
+}
+
+// SetGroupWithinMinutes sets the author-grouping window (minutes) for the
+// reply list. 0 disables grouping. A change invalidates the render cache.
+func (m *Model) SetGroupWithinMinutes(minutes int) {
+	if minutes < 0 {
+		minutes = 0
+	}
+	if m.groupWithin == minutes {
+		return
+	}
+	m.groupWithin = minutes
+	m.cache = nil
+	m.viewCacheValid = false
+	m.dirty()
+}
+
+// replyIsContinuation reports whether m.replies[i] renders collapsed under
+// m.replies[i-1] as a same-author continuation. Reply 0 is never a
+// continuation (it follows the parent, which is always a full header). An
+// unread "── new ──" landmark between the two replies forces a full header.
+func (m *Model) replyIsContinuation(i int) bool {
+	if i <= 0 || m.groupWithin <= 0 {
+		return false
+	}
+	prev := m.replies[i-1]
+	cur := m.replies[i]
+	if !messages.ContinuesGroup(prev, cur, m.groupWithin) {
+		return false
+	}
+	if m.unreadBoundaryTS != "" && prev.TS <= m.unreadBoundaryTS && cur.TS > m.unreadBoundaryTS {
+		return false
+	}
+	return true
 }
 
 // AddReply appends a reply to the thread and scrolls to the bottom.
@@ -1312,7 +1350,7 @@ func (m *Model) View(height, width int) string {
 	// image). OnFlush marks the id uploaded, so this fires once per id and
 	// is a no-op on subsequent renders. The parent's reaction-hit rects are
 	// still discarded (clickable parent reactions are a separate follow-up).
-	parentContent, parentFlushes, _ := m.renderThreadMessage(m.parent, width, m.avatarFor(m.parent.UserID), m.userNames, m.channelNames, false)
+	parentContent, parentFlushes, _ := m.renderThreadMessage(m.parent, width, m.avatarFor(m.parent.UserID), m.userNames, m.channelNames, false, false)
 	if len(parentFlushes) > 0 {
 		var parentFlushBuf bytes.Buffer
 		for _, fl := range parentFlushes {
@@ -1419,7 +1457,7 @@ func (m *Model) View(height, width int) string {
 			// so the cache rebuilds whenever the highlighted index changes.
 			// This matches the messages-pane convention
 			// (internal/ui/messages/model.go:1050).
-			rendered, attachFlushes, reactHits := m.renderThreadMessage(reply, width, m.avatarFor(reply.UserID), m.userNames, m.channelNames, i == m.selected)
+			rendered, attachFlushes, reactHits := m.renderThreadMessage(reply, width, m.avatarFor(reply.UserID), m.userNames, m.channelNames, i == m.selected, m.replyIsContinuation(i))
 			// Two filled variants — see internal/ui/messages/model.go for the
 			// rationale. Without per-variant fills, the trailing whitespace of
 			// every wrapped line shows the wrong bg and the tint stops at the
@@ -1794,8 +1832,17 @@ func (m *Model) blockkitContext(msg messages.MessageItem, userNames, channelName
 	}
 }
 
-func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, avatarStr string, userNames map[string]string, channelNames map[string]string, isSelected bool) (string, []func(io.Writer) error, []reactionEntryHit) {
+func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, avatarStr string, userNames map[string]string, channelNames map[string]string, isSelected bool, continuation bool) (string, []func(io.Writer) error, []reactionEntryHit) {
 	line := styles.Username.Render(msg.UserName) + lipgloss.NewStyle().Background(styles.Background).Render("  ") + styles.Timestamp.Render(msg.Timestamp)
+
+	// A continuation reply renders no header row (see content assembly +
+	// reactionRowBase below).
+	header := line + "\n"
+	headerRows := 1
+	if continuation {
+		header = ""
+		headerRows = 0
+	}
 
 	// Reserve a left gutter for the avatar (4 cols + 1 gap), mirroring the
 	// messages pane. The gutter is prepended via PlaceAvatarBeside below;
@@ -2030,7 +2077,7 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, avatarS
 		// col 0 is the thick left border; the avatar gutter (when present)
 		// follows it, so content starts at 1+avatarCols.
 		contentColBase := 1 + avatarCols
-		reactionRowBase := 1 + lipgloss.Height(text) + bkLineCount + attachmentLineCount
+		reactionRowBase := headerRows + lipgloss.Height(text) + bkLineCount + attachmentLineCount
 		for _, ps := range pillSpecs {
 			row := reactionRowBase + ps.lineIdx
 			reactionHits = append(reactionHits, reactionEntryHit{
@@ -2043,9 +2090,16 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, avatarS
 		}
 	}
 
-	content := line + "\n" + text + bkBlock + attachmentLines + reactionLine
+	// Author grouping: a continuation reply (same author as the reply above,
+	// within the window) omits the username/timestamp header and reserves a
+	// blank avatar gutter so its body aligns under the group leader.
+	content := header + text + bkBlock + attachmentLines + reactionLine
 	if avatarStr != "" {
-		content = messages.PlaceAvatarBeside(avatarStr, content)
+		if continuation {
+			content = messages.PlaceAvatarBeside(messages.BlankAvatarGutter(), content)
+		} else {
+			content = messages.PlaceAvatarBeside(avatarStr, content)
+		}
 	}
 	return content, flushes, reactionHits
 }
