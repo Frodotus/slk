@@ -3,7 +3,7 @@
 A blazingly fast Slack TUI. Keyboard-driven, beautifully themed, under 20MB,
 one static binary, no Electron required.
 
-Marketing site: [getslk.sh](https://getslk.sh) · Source: [github.com/gammons/slk](https://github.com/gammons/slk)
+Marketing site: [getslk.sh](https://getslk.sh) · Source: [github.com/Frodotus/slk](https://github.com/Frodotus/slk)
 
 ## Getting started
 
@@ -25,5 +25,5 @@ Marketing site: [getslk.sh](https://getslk.sh) · Source: [github.com/gammons/sl
 
 ## Project
 
-- License: [MIT](https://github.com/gammons/slk/blob/main/LICENSE)
+- License: [MIT](https://github.com/Frodotus/slk/blob/main/LICENSE)
 - `slk` is an independent, unofficial project. Not affiliated with Slack Technologies, LLC. See the [[Tradeoffs and Non-Goals|Tradeoffs-and-Non-Goals]] page for the TOS caveat.

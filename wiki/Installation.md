@@ -76,7 +76,7 @@ On Linux, `Ctrl+V` paste-to-upload needs slightly different setup depending on y
 slk auto-detects the session via `WAYLAND_DISPLAY` at startup. On headless Linux (or when neither dependency is met), slk runs but `Ctrl+V` smart-paste is disabled.
 
 ```bash
-git clone https://github.com/gammons/slk.git
+git clone https://github.com/Frodotus/slk.git
 cd slk
 make build       # binary at bin/slk
 ```

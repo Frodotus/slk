@@ -19,4 +19,4 @@
 
 ---
 
-[Marketing site](https://getslk.sh) · [Source](https://github.com/gammons/slk)
+[Marketing site](https://getslk.sh) · [Source](https://github.com/Frodotus/slk)
