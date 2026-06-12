@@ -22,12 +22,15 @@ func (f *fakeStarSectionsClient) GetChannelSections(ctx context.Context) ([]slac
 // with an empty name, which its system sections do.
 func TestStarredSectionLabelFallback(t *testing.T) {
 	store := service.NewSectionStore()
+	// The stars section bootstraps EMPTY from channelSections (as it always
+	// does); membership arrives via the durable stars.list set.
 	c := &fakeStarSectionsClient{sections: []slackclient.SidebarSection{
-		{ID: "T", Type: "stars", Next: "", LastUpdate: 1, ChannelIDs: []string{"C1"}, ChannelsCount: 1},
+		{ID: "T", Type: "stars", Next: "", LastUpdate: 1},
 	}}
 	if err := store.Bootstrap(context.Background(), c); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
+	store.SetStarred([]string{"C1"})
 
 	metas := sectionsProviderAdapter{store: store}.OrderedSlackSections()
 	if len(metas) != 1 {

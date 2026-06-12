@@ -27,6 +27,14 @@ type SectionStore struct {
 	sectionsByID     map[string]*slk.SidebarSection
 	channelToSection map[string]string
 	lastBootstrap    time.Time
+	// starred is the durable set of starred-conversation IDs sourced from
+	// the legacy stars.list API and kept live by star_added/star_removed
+	// events. It is held OUTSIDE sectionsByID/channelToSection because the
+	// channelSections "stars" section always bootstraps EMPTY, so Bootstrap
+	// must re-apply this set every time it rebuilds the section maps —
+	// otherwise the Starred section vanishes on the first reconnect-
+	// triggered re-bootstrap (MaybeRebootstrap).
+	starred []string
 }
 
 // NewSectionStore returns an empty store. It reports Ready()==false until
@@ -84,6 +92,10 @@ func (s *SectionStore) Bootstrap(ctx context.Context, client SectionsClient) err
 	s.channelToSection = c2s
 	s.ready = true
 	s.lastBootstrap = time.Now()
+	// Re-apply the durable starred set: channelSections always reports the
+	// stars section empty, so without this a re-bootstrap (reconnect) would
+	// drop the Starred channels sourced out-of-band from stars.list.
+	s.applyStarredLocked()
 	s.mu.Unlock()
 	return nil
 }
@@ -142,6 +154,108 @@ func (s *SectionStore) SectionIDByType(sectionType string) (string, bool) {
 		}
 	}
 	return best, best != ""
+}
+
+// SetStarred replaces the durable starred-conversation set (sourced from
+// stars.list) and re-applies it to the Starred section. Safe to call after
+// Bootstrap; the set is retained so every subsequent (re-)Bootstrap
+// re-applies it.
+func (s *SectionStore) SetStarred(channelIDs []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.starred = dedupeStrings(channelIDs)
+	s.applyStarredLocked()
+}
+
+// AddStar records a newly-starred conversation (star_added WS event) and
+// re-applies the Starred section. No-op if already starred.
+func (s *SectionStore) AddStar(channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ch := range s.starred {
+		if ch == channelID {
+			return
+		}
+	}
+	s.starred = append(s.starred, channelID)
+	s.applyStarredLocked()
+}
+
+// RemoveStar drops an un-starred conversation (star_removed WS event) and
+// re-applies the Starred section; the channel rebuckets via type-default.
+func (s *SectionStore) RemoveStar(channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.starred[:0]
+	for _, ch := range s.starred {
+		if ch != channelID {
+			out = append(out, ch)
+		}
+	}
+	s.starred = out
+	s.applyStarredLocked()
+}
+
+// applyStarredLocked re-derives the Starred section's membership from the
+// durable starred set. Caller must hold s.mu. It fully rebuilds the stars
+// section's claim so it is idempotent and safe to run after every Bootstrap
+// (which rebuilds the section maps from channelSections, where the stars
+// section is empty) and after each star event. No-op when no stars-typed
+// section exists.
+func (s *SectionStore) applyStarredLocked() {
+	// Locate the stars section (lexically-smallest id for determinism).
+	starsID := ""
+	for id, sec := range s.sectionsByID {
+		if sec.Type == SectionTypeStars && (starsID == "" || id < starsID) {
+			starsID = id
+		}
+	}
+	if starsID == "" {
+		return
+	}
+	// Drop the stars section's previous claim so un-starred channels
+	// rebucket into their type-default section.
+	for ch, sec := range s.channelToSection {
+		if sec == starsID {
+			delete(s.channelToSection, ch)
+		}
+	}
+	// Re-claim each starred channel, pulling it out of whatever natural
+	// section Bootstrap placed it in (a channel belongs to one section).
+	ids := make([]string, 0, len(s.starred))
+	for _, ch := range s.starred {
+		if prev, ok := s.channelToSection[ch]; ok && prev != starsID {
+			if old := s.sectionsByID[prev]; old != nil {
+				filtered := old.ChannelIDs[:0]
+				for _, x := range old.ChannelIDs {
+					if x != ch {
+						filtered = append(filtered, x)
+					}
+				}
+				old.ChannelIDs = filtered
+			}
+		}
+		s.channelToSection[ch] = starsID
+		ids = append(ids, ch)
+	}
+	starsSec := s.sectionsByID[starsID]
+	starsSec.ChannelIDs = ids
+	starsSec.ChannelsCount = len(ids)
+}
+
+func dedupeStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // OrderedSections walks the linked-list (head-first) and returns the

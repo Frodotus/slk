@@ -1960,9 +1960,10 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 			if starIDs, serr := client.StarsList(starCtx); serr != nil {
 				log.Printf("stars.list for %s failed: %v (Starred empty until a star event)", token.TeamName, serr)
 			} else if len(starIDs) > 0 {
-				if secID, ok := store.SectionIDByType(service.SectionTypeStars); ok {
-					store.ApplyChannelsAdded(secID, starIDs)
-				}
+				// Feed the starred channels into the store's durable set so
+				// they survive reconnect-triggered re-bootstraps (the
+				// channelSections stars section always comes back empty).
+				store.SetStarred(starIDs)
 			}
 			cancelStars()
 			// One-time info log when the user has both Slack sections
@@ -4117,10 +4118,8 @@ func (h *rtmEventHandler) OnStarAdded(channelID string) {
 	if h.wsCtx == nil || h.wsCtx.SectionStore == nil {
 		return
 	}
-	if secID, ok := h.wsCtx.SectionStore.SectionIDByType(service.SectionTypeStars); ok {
-		h.wsCtx.SectionStore.ApplyChannelsAdded(secID, []string{channelID})
-		h.refreshSectionsForActive()
-	}
+	h.wsCtx.SectionStore.AddStar(channelID)
+	h.refreshSectionsForActive()
 }
 
 // OnStarRemoved handles a star_removed WS event: drop the channel from
@@ -4129,10 +4128,8 @@ func (h *rtmEventHandler) OnStarRemoved(channelID string) {
 	if h.wsCtx == nil || h.wsCtx.SectionStore == nil {
 		return
 	}
-	if secID, ok := h.wsCtx.SectionStore.SectionIDByType(service.SectionTypeStars); ok {
-		h.wsCtx.SectionStore.ApplyChannelsRemoved(secID, []string{channelID})
-		h.refreshSectionsForActive()
-	}
+	h.wsCtx.SectionStore.RemoveStar(channelID)
+	h.refreshSectionsForActive()
 }
 
 // OnPrefChange handles user-pref mutations from the WebSocket. Currently
