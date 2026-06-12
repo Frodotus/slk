@@ -2064,9 +2064,10 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, avatarS
 	}
 
 	// Translate per-pill specs into reactionEntryHit rects. Row layout
-	// of the reply content (pre-border, pre-tint):
-	//   row 0: username + timestamp line
-	//   rows [1 .. 1+textRows): wrapped body text
+	// of the reply content (pre-border, pre-tint), where headerRows is 1
+	// for a normal reply and 0 for a grouped continuation (no header):
+	//   rows [0 .. headerRows): username + timestamp line (omitted when 0)
+	//   rows [headerRows .. +textRows): wrapped body text
 	//   rows [.. +bkLineCount): block kit + legacy attachment content
 	//   rows [.. +attachmentLineCount): file attachments
 	//   rows [reactionRowBase ..): reaction lines

@@ -49,6 +49,25 @@ func TestAuthorGrouping_DisabledShowsEveryHeader(t *testing.T) {
 	}
 }
 
+func TestAuthorGrouping_EditedMarkerOnContinuation(t *testing.T) {
+	msgs := []MessageItem{
+		{TS: "100.0", UserID: "U1", UserName: "alice", Text: "first", Timestamp: "3:04 PM"},
+		{TS: "160.0", UserID: "U1", UserName: "alice", Text: "second", Timestamp: "3:05 PM", IsEdited: true},
+	}
+	m := New(msgs, "general")
+	m.SetGroupWithinMinutes(5)
+	out := ansi.Strip(m.View(20, 60))
+
+	if got := strings.Count(out, "alice"); got != 1 {
+		t.Errorf("grouped run should show author once; got %d:\n%s", got, out)
+	}
+	// The edited continuation still surfaces the "(edited)" marker even
+	// though its header is gone.
+	if !strings.Contains(out, "(edited)") {
+		t.Errorf("edited continuation should still show (edited):\n%s", out)
+	}
+}
+
 func TestAuthorGrouping_DifferentAuthorBreaksGroup(t *testing.T) {
 	msgs := []MessageItem{
 		{TS: "100.0", UserID: "U1", UserName: "alice", Text: "hi", Timestamp: "3:04 PM"},

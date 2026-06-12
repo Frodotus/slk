@@ -61,17 +61,16 @@ func TestContinuesGroup(t *testing.T) {
 	}
 }
 
-// TestContinuesGroup_DayBoundary verifies that two same-author messages a
-// few minutes apart but straddling midnight do NOT group (a date separator
-// renders between them).
+// TestContinuesGroup_DayBoundary verifies that two same-author messages on
+// different calendar days do NOT group (a date separator renders between
+// them), even within a large window. DateFromTS resolves in local time, so
+// rather than hard-code a midnight-crossing pair, this first sanity-checks
+// the same-day path (when the two stamps happen to land on the same local
+// day) and then forces a guaranteed different-day case by adding a full
+// 86,400 seconds.
 func TestContinuesGroup_DayBoundary(t *testing.T) {
-	// 23:58 and 00:01 the next day, in UTC. DateFromTS uses local time, so
-	// pick a gap that crosses local midnight regardless of zone by using a
-	// full-day-aligned pair is hard; instead assert via DateFromTS directly.
 	prevTS := tsAt(1_700_000_000)
-	// +3 minutes — same day unless we happen to be on a boundary; this
-	// case is primarily covered by the unit assertion below.
-	curTS := tsAt(1_700_000_180)
+	curTS := tsAt(1_700_000_180) // +3 minutes; same local day in any zone
 	prev := MessageItem{UserID: "U1", TS: prevTS}
 	cur := MessageItem{UserID: "U1", TS: curTS}
 	if DateFromTS(prevTS) == DateFromTS(curTS) {

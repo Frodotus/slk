@@ -2125,16 +2125,27 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 	// Author grouping: a continuation message (same author as the message
 	// above, within the configured window) omits the username/timestamp
 	// header row entirely. The "(edited)" marker normally rides that header,
-	// so on a continuation it is appended to the body instead (no extra
-	// row). ContinuesGroup guarantees a continuation has an empty Subtype,
-	// so broadcastLabel below is never set for one.
+	// so on a continuation it moves to the body. ContinuesGroup guarantees a
+	// continuation has an empty Subtype, so broadcastLabel below is never set
+	// for one.
 	header := line + editedMark + "\n"
 	headerRows := 1 // username + ts row
 	if continuation {
 		header = ""
 		headerRows = 0
+		// Append the marker to the last wrapped body line only when it fits
+		// within contentWidth; otherwise drop it onto its own line. A blind
+		// concat onto the already-wrapped text could push the last line past
+		// contentWidth and break the alignment / background fill.
 		if editedMark != "" {
-			text += editedMark
+			lines := strings.Split(text, "\n")
+			last := lines[len(lines)-1]
+			if lipgloss.Width(last)+lipgloss.Width(editedMark) <= contentWidth {
+				lines[len(lines)-1] = last + editedMark
+			} else {
+				lines = append(lines, editedMark)
+			}
+			text = strings.Join(lines, "\n")
 		}
 	}
 
