@@ -20,6 +20,9 @@ image_protocol = "auto"   # auto | kitty | sixel | halfblock | off
 max_image_rows = 20       # cap inline image height in terminal rows
 panel_borders = true      # draw the box border around each pane;
                           # false = a thin left accent bar instead
+group_within_minutes = 5  # collapse consecutive messages from the same
+                          # author sent within N minutes (hide the repeated
+                          # avatar/name/timestamp); 0 = disabled (default)
 
 [animations]
 enabled = true

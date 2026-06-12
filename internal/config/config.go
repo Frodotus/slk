@@ -130,6 +130,11 @@ type Appearance struct {
 	Theme           string `toml:"theme"`
 	TimestampFormat string `toml:"timestamp_format"`
 	ShowAvatars     bool   `toml:"show_avatars"`
+	// GroupWithinMinutes collapses consecutive messages from the same
+	// author that arrive within this many minutes into a single visual
+	// group: the continuation messages drop the repeated avatar, username,
+	// and timestamp. 0 (the default) disables grouping.
+	GroupWithinMinutes int `toml:"group_within_minutes"`
 	// PanelBorders draws the rounded/thick box border around each pane
 	// (sidebar, messages, thread). When false the boxes are replaced by a
 	// single thin left accent bar per pane — dim as a separator, the theme

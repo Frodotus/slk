@@ -1881,6 +1881,13 @@ func (a *App) SetAvatarFunc(fn messages.AvatarFunc) {
 	a.threadPanel.SetAvatarFunc(fn)
 }
 
+// SetGroupWithinMinutes sets the author-grouping window (minutes) on both
+// the message pane and the thread reply list. 0 disables grouping.
+func (a *App) SetGroupWithinMinutes(minutes int) {
+	a.messagepane.SetGroupWithinMinutes(minutes)
+	a.threadPanel.SetGroupWithinMinutes(minutes)
+}
+
 // SetImageContext configures the inline-image rendering pipeline on the
 // messages pane. Should be called once at startup, before the first
 // View(). Pass a zero-valued ImageContext to disable inline rendering.

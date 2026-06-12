@@ -662,6 +662,7 @@ func run() error {
 	// Create app
 	app := ui.NewApp()
 	app.SetPanelBorders(cfg.Appearance.PanelBorders)
+	app.SetGroupWithinMinutes(cfg.Appearance.GroupWithinMinutes)
 	app.SetHelpFooter(versionpkg.ModalFooter(version))
 	app.SetClipboardAvailable(clipboardOK)
 	app.SetKeepFocusOnList(cfg.General.KeepFocusOnList)
