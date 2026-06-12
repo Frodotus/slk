@@ -1304,11 +1304,26 @@ func (m *Model) View(height, width int) string {
 
 	// Render the parent message once -- it now lives at the top of the
 	// scrollable viewContent (chrome only carries the header + separator).
-	// We discard the parent's image flushes and reaction-hit rects in v1:
-	// parent attachments are rare and threading flushes through the cache
-	// lifecycle adds complexity; reply flushes and hit rects ARE captured
-	// in the per-reply loop below.
-	parentContent, _, _ := m.renderThreadMessage(m.parent, width, m.avatarFor(m.parent.UserID), m.userNames, m.channelNames, false)
+	// Capture the parent's image flushes and upload them here, covering
+	// BOTH the no-replies and with-replies paths below: parentBlock's kitty
+	// placeholders reference image ids that must be uploaded out-of-band,
+	// and reply flushes alone don't carry the parent's (issue #4 -- without
+	// this a thread opened on an image message shows a stale/garbage parent
+	// image). OnFlush marks the id uploaded, so this fires once per id and
+	// is a no-op on subsequent renders. The parent's reaction-hit rects are
+	// still discarded (clickable parent reactions are a separate follow-up).
+	parentContent, parentFlushes, _ := m.renderThreadMessage(m.parent, width, m.avatarFor(m.parent.UserID), m.userNames, m.channelNames, false)
+	if len(parentFlushes) > 0 {
+		var parentFlushBuf bytes.Buffer
+		for _, fl := range parentFlushes {
+			if fl != nil {
+				_ = fl(&parentFlushBuf)
+			}
+		}
+		if parentFlushBuf.Len() > 0 {
+			_, _ = imgpkg.KittyOutput.Write(parentFlushBuf.Bytes())
+		}
+	}
 	parentSeparator := lipgloss.NewStyle().
 		Width(width).
 		Background(styles.Background).
