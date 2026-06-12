@@ -17,7 +17,18 @@ func (f *fakeSectionsClient) GetChannelSections(ctx context.Context) ([]slk.Side
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
-	return f.sections, nil
+	// Return a fresh deep copy on every call, like the real client (which
+	// decodes a fresh HTTP response). This prevents the store's in-place
+	// section mutations from leaking back into the fake and corrupting a
+	// later (re-)Bootstrap — which would mask the re-bootstrap behavior.
+	out := make([]slk.SidebarSection, len(f.sections))
+	for i, sec := range f.sections {
+		out[i] = sec
+		if sec.ChannelIDs != nil {
+			out[i].ChannelIDs = append([]string(nil), sec.ChannelIDs...)
+		}
+	}
+	return out, nil
 }
 
 func TestSectionStore_Bootstrap_Empty(t *testing.T) {
@@ -112,17 +123,20 @@ func TestSectionStore_OrderedSections_FiltersSystemTypes(t *testing.T) {
 // is pinned to the top regardless of its place in Slack's linked list, and
 // claims its channels (so they don't also appear in the catch-all).
 func TestSectionStore_Stars_RendersClaimsAndPinsTop(t *testing.T) {
-	// Chain: head=U(standard, C1) -> T(stars, C2). Stars is LAST in the
-	// chain but must be hoisted to the top.
+	// Chain: head=U(standard, C1) -> T(stars). Stars is LAST in the chain
+	// but must be hoisted to the top. The stars section bootstraps EMPTY
+	// (as it always does from channelSections); C2's membership arrives via
+	// the durable stars.list set, exactly like production.
 	sections := []slk.SidebarSection{
 		{ID: "U", Name: "Mine", Type: "standard", Next: "T", LastUpdate: 1, ChannelIDs: []string{"C1"}, ChannelsCount: 1},
-		{ID: "T", Name: "", Type: "stars", Next: "", LastUpdate: 1, ChannelIDs: []string{"C2"}, ChannelsCount: 1},
+		{ID: "T", Name: "", Type: "stars", Next: "", LastUpdate: 1},
 	}
 	c := &fakeSectionsClient{sections: sections}
 	store := NewSectionStore()
 	if err := store.Bootstrap(context.Background(), c); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
+	store.SetStarred([]string{"C2"})
 
 	got := store.OrderedSections()
 	if len(got) != 2 {
@@ -174,6 +188,66 @@ func TestSectionStore_Stars_PopulatedViaApplyChannels(t *testing.T) {
 	}
 	if id, ok := store.SectionForChannel("C_STARRED"); !ok || id != "L_STARS" {
 		t.Errorf("SectionForChannel(C_STARRED) = (%q, %v), want (L_STARS, true) — claimed by stars", id, ok)
+	}
+}
+
+// TestSectionStore_Stars_SurviveRebootstrap is the regression for the
+// "Starred channels disappear after a while" bug. Starred membership comes
+// from stars.list (out-of-band); the channelSections "stars" section always
+// bootstraps EMPTY. A reconnect triggers MaybeRebootstrap -> Bootstrap,
+// which rebuilds the section maps from channelSections. Before the fix the
+// stars membership lived only in those maps, so the re-bootstrap wiped it
+// and Starred vanished. The durable starred set must be re-applied on every
+// Bootstrap.
+func TestSectionStore_Stars_SurviveRebootstrap(t *testing.T) {
+	sections := []slk.SidebarSection{
+		{ID: "L_STARS", Type: "stars", Next: "L_STD", LastUpdate: 1}, // empty from channelSections
+		{ID: "L_STD", Type: "standard", Name: "Mine", Next: "", LastUpdate: 1, ChannelIDs: []string{"C1"}, ChannelsCount: 1},
+	}
+	c := &fakeSectionsClient{sections: sections}
+	store := NewSectionStore()
+	if err := store.Bootstrap(context.Background(), c); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	// stars.list membership arrives out-of-band.
+	store.SetStarred([]string{"C_STARRED"})
+	if got := store.OrderedSections(); len(got) != 2 || got[0].Type != "stars" {
+		t.Fatalf("after stars.list: want stars pinned first + standard, got %+v", got)
+	}
+
+	// Simulate the reconnect re-bootstrap (MaybeRebootstrap -> Bootstrap):
+	// channelSections STILL reports the stars section empty.
+	if err := store.Bootstrap(context.Background(), c); err != nil {
+		t.Fatalf("re-Bootstrap: %v", err)
+	}
+
+	got := store.OrderedSections()
+	if len(got) != 2 || got[0].Type != "stars" {
+		t.Fatalf("after re-bootstrap: Starred disappeared; want stars pinned first + standard, got %+v", got)
+	}
+	if id, ok := store.SectionForChannel("C_STARRED"); !ok || id != "L_STARS" {
+		t.Errorf("SectionForChannel(C_STARRED) = (%q, %v), want (L_STARS, true) — starred membership must survive re-bootstrap", id, ok)
+	}
+}
+
+// TestSectionStore_Stars_RemoveStar verifies an un-starred channel drops out
+// of the Starred section (and the section hides when it empties).
+func TestSectionStore_Stars_RemoveStar(t *testing.T) {
+	sections := []slk.SidebarSection{
+		{ID: "L_STARS", Type: "stars", Next: "L_STD", LastUpdate: 1},
+		{ID: "L_STD", Type: "standard", Name: "Mine", Next: "", LastUpdate: 1, ChannelIDs: []string{"C1"}, ChannelsCount: 1},
+	}
+	store := NewSectionStore()
+	if err := store.Bootstrap(context.Background(), &fakeSectionsClient{sections: sections}); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	store.SetStarred([]string{"C_STARRED"})
+	store.RemoveStar("C_STARRED")
+	if got := store.OrderedSections(); len(got) != 1 || got[0].ID != "L_STD" {
+		t.Fatalf("after RemoveStar the empty Starred section should hide; want only L_STD, got %+v", got)
+	}
+	if _, ok := store.SectionForChannel("C_STARRED"); ok {
+		t.Errorf("SectionForChannel(C_STARRED) ok=true after un-star; want false")
 	}
 }
 
