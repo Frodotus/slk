@@ -93,6 +93,15 @@ type EventHandler interface {
 
 	// OnMemberLeft is delivered for member_left_channel WS events.
 	OnMemberLeft(channelID, userID string)
+
+	// OnHuddleChanged is delivered for sh_room_join / sh_room_leave WS
+	// events whose room is a huddle (call_family == "huddle"). channelID is
+	// the conversation the huddle lives in; participantIDs is the room's
+	// authoritative full participant list (empty when the huddle has ended);
+	// huddleURL is the room's join link (room.huddle_link), used for the
+	// "open in Slack" handoff. The receiver replaces, not merges, its
+	// per-channel state from participantIDs.
+	OnHuddleChanged(channelID string, participantIDs []string, huddleURL string)
 }
 
 // wsEvent is the minimal structure for identifying a WebSocket event type.
@@ -277,6 +286,38 @@ type wsThreadSubscribedEvent struct {
 		LastRead string `json:"last_read"`
 		Active   bool   `json:"active"`
 	} `json:"subscription"`
+}
+
+// wsRoomEvent represents sh_room_join / sh_room_leave events from Slack's
+// browser-protocol WebSocket. A "room" covers several call types; only those
+// with call_family == "huddle" are huddles. room.participants is the
+// authoritative current participant list (empty once everyone has left).
+// huddle.channel_id (falling back to room.channels[0]) identifies the
+// conversation; room.huddle_link is the join URL.
+type wsRoomEvent struct {
+	Type string `json:"type"`
+	Room struct {
+		ID           string   `json:"id"`
+		CallFamily   string   `json:"call_family"`
+		Participants []string `json:"participants"`
+		Channels     []string `json:"channels"`
+		HuddleLink   string   `json:"huddle_link"`
+	} `json:"room"`
+	Huddle struct {
+		ChannelID string `json:"channel_id"`
+	} `json:"huddle"`
+}
+
+// channelID resolves the conversation the room belongs to, preferring the
+// explicit huddle.channel_id and falling back to the first room.channels entry.
+func (e wsRoomEvent) channelID() string {
+	if e.Huddle.ChannelID != "" {
+		return e.Huddle.ChannelID
+	}
+	if len(e.Room.Channels) > 0 {
+		return e.Room.Channels[0]
+	}
+	return ""
 }
 
 // dispatchWebSocketEvent parses a raw JSON WebSocket message and routes it
@@ -489,6 +530,19 @@ func dispatchWebSocketEvent(data []byte, handler EventHandler) {
 			return
 		}
 		handler.OnPrefChange(evt.Name, evt.stringValue())
+
+	case "sh_room_join", "sh_room_leave":
+		var evt wsRoomEvent
+		if err := json.Unmarshal(data, &evt); err != nil {
+			return
+		}
+		// Only huddles; ignore other call families (1:1 Slack calls, etc.).
+		if evt.Room.CallFamily != "huddle" {
+			return
+		}
+		ch := evt.channelID()
+		debuglog.WS("%s: channel=%s participants=%d room=%s", evt.Type, ch, len(evt.Room.Participants), evt.Room.ID)
+		handler.OnHuddleChanged(ch, evt.Room.Participants, evt.Room.HuddleLink)
 
 	case "hello":
 		debuglog.WS("hello: connected")

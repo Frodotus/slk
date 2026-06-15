@@ -53,6 +53,7 @@ type KeyMap struct {
 	Help                key.Binding
 	SaveThread          key.Binding
 	ListReactions       key.Binding
+	JoinHuddle          key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -106,5 +107,6 @@ func DefaultKeyMap() KeyMap {
 		Help:                key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "show keybindings")),
 		SaveThread:          key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "save thread")),
 		ListReactions:       key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "list reactions")),
+		JoinHuddle:          key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "open huddle in Slack")),
 	}
 }

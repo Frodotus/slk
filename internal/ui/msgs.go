@@ -253,6 +253,9 @@ type (
 		// workspace. Nil means "use config-glob behavior" (the App's
 		// sidebar reverts to its existing name-keyed buckets).
 		SectionsProvider sidebar.SectionsProvider
+		// HuddleProvider supplies this workspace's live huddle state for the
+		// channel-header line and the open-in-Slack handoff.
+		HuddleProvider HuddleProvider
 	}
 	// ReadStateChangedMsg is sent whenever the persistent read state changes,
 	// so panels that read from cache.GetWorkspaceReadState re-render.
@@ -317,6 +320,9 @@ type (
 		// workspace. Nil means "use config-glob behavior" (the App's
 		// sidebar reverts to its existing name-keyed buckets).
 		SectionsProvider sidebar.SectionsProvider
+		// HuddleProvider supplies this workspace's live huddle state for the
+		// channel-header line and the open-in-Slack handoff.
+		HuddleProvider HuddleProvider
 		// InitialActive is true for exactly one WorkspaceReadyMsg per
 		// program run: the workspace whose team ID matches the configured
 		// default_workspace, or — if no default is configured — the first

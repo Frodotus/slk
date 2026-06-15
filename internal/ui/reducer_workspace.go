@@ -83,6 +83,10 @@ var reduceWorkspace reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	case SectionsRefreshedMsg:
 		if m.TeamID == a.activeTeamID {
 			a.SetChannels(m.Channels)
+			// This signal also fires on huddle changes; keep the open
+			// channel's header huddle line in sync (no-op for mute/section
+			// refreshes since the line is unchanged).
+			a.refreshHuddleHeader()
 		}
 		// Inactive-workspace events have already updated the
 		// WorkspaceContext.Channels in cmd/slk; App.Update only
@@ -186,6 +190,7 @@ func reduceWorkspaceReady(a *App, m WorkspaceReadyMsg) tea.Cmd {
 			a.sidebar.SetWidth(m.SidebarWidth)
 		}
 		a.sidebar.SetSectionsProvider(m.SectionsProvider)
+		a.SetHuddleProvider(m.HuddleProvider)
 		a.SetChannels(m.Channels)
 		a.channelFinder.SetItems(m.FinderItems)
 		// SetExternalUsers re-pushes user-names; calling
@@ -275,6 +280,7 @@ func reduceWorkspaceSwitched(a *App, m WorkspaceSwitchedMsg) tea.Cmd {
 	a.SetMode(ModeNormal)
 	a.compose.Blur()
 	a.sidebar.SetSectionsProvider(m.SectionsProvider)
+	a.SetHuddleProvider(m.HuddleProvider)
 	a.SetChannels(m.Channels)
 	a.channelFinder.SetItems(m.FinderItems)
 	// SetExternalUsers re-pushes user-names; calling SetUserNames

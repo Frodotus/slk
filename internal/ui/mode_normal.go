@@ -242,6 +242,9 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, a.keys.ListReactions):
 		return a.openReactionsView()
 
+	case key.Matches(msg, a.keys.JoinHuddle):
+		return a.openHuddle()
+
 	case key.Matches(msg, a.keys.SaveThread):
 		return a.saveThreadToFile()
 

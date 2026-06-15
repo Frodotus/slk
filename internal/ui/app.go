@@ -128,6 +128,12 @@ type App struct {
 	activeChannelID string
 	activeTeamID    string // workspace whose data is currently loaded into the side panels
 
+	// huddleProvider exposes the active workspace's live huddle state for
+	// the channel-header line and the "open in Slack" handoff. Nil until
+	// wired via SetHuddleProvider (it points at the active workspace's
+	// service.HuddleStore).
+	huddleProvider HuddleProvider
+
 	// windowTitle is the cached terminal-window-title string, recomputed
 	// by notifyReadStateChanged on every read-state mutation and read by
 	// View() into tea.View.WindowTitle. Bubbletea's renderer emits OSC 2
@@ -1888,6 +1894,59 @@ func (a *App) SetGroupWithinMinutes(minutes int) {
 	a.threadPanel.SetGroupWithinMinutes(minutes)
 }
 
+// HuddleProvider exposes live huddle state for a workspace. *service.HuddleStore
+// satisfies it. Defined here (consumer side) so the ui package doesn't import
+// the service package.
+type HuddleProvider interface {
+	Active(channelID string) bool
+	Participants(channelID string) []string
+	URL(channelID string) string
+}
+
+// SetHuddleProvider installs the active workspace's huddle state source, used
+// for the channel-header huddle line and the open-in-Slack handoff.
+func (a *App) SetHuddleProvider(p HuddleProvider) {
+	a.huddleProvider = p
+	a.refreshHuddleHeader()
+}
+
+// refreshHuddleHeader rebuilds the message-pane huddle header line for the
+// active channel from the provider, resolving participant IDs to display
+// names. Called on channel switch and whenever huddle state changes.
+func (a *App) refreshHuddleHeader() {
+	if a.huddleProvider == nil || a.activeChannelID == "" || !a.huddleProvider.Active(a.activeChannelID) {
+		a.messagepane.SetChannelHuddle("")
+		return
+	}
+	ids := a.huddleProvider.Participants(a.activeChannelID)
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if n := a.messagepane.ResolveUserName(id); n != "" {
+			names = append(names, n)
+		} else {
+			names = append(names, id)
+		}
+	}
+	a.messagepane.SetChannelHuddle("🎧 Huddle · " + strings.Join(names, ", "))
+}
+
+// openHuddle hands off to the official Slack client to join the active
+// channel's huddle (slk itself carries no audio). No-op with a toast when
+// there is no active huddle.
+func (a *App) openHuddle() tea.Cmd {
+	if a.huddleProvider == nil || a.activeChannelID == "" || !a.huddleProvider.Active(a.activeChannelID) {
+		return func() tea.Msg { return ToastMsg{Text: "No active huddle in this channel"} }
+	}
+	url := a.huddleProvider.URL(a.activeChannelID)
+	if url == "" {
+		return func() tea.Msg { return ToastMsg{Text: "Can't build a huddle link for this channel"} }
+	}
+	return tea.Batch(
+		a.browserOpener(url),
+		func() tea.Msg { return ToastMsg{Text: "Opening huddle in Slack…"} },
+	)
+}
+
 // SetImageContext configures the inline-image rendering pipeline on the
 // messages pane. Should be called once at startup, before the first
 // View(). Pass a zero-valued ImageContext to disable inline rendering.
@@ -2274,6 +2333,7 @@ func (a *App) SetCustomEmoji(customs map[string]string) {
 func (a *App) SetInitialChannel(channelID, channelName string, msgs []messages.MessageItem) {
 	a.activeChannelID = channelID
 	a.messagepane.SetChannel(channelName, "")
+	a.refreshHuddleHeader() // show the huddle line if this channel has one
 	a.messagepane.SetMessages(msgs)
 	a.compose.SetChannel(channelName)
 	a.statusbar.SetChannel(channelName)

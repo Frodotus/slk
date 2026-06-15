@@ -76,6 +76,18 @@ See [[Terminal Compatibility|Terminal-Compatibility]] for which protocol your te
 - Triggers on DMs, mentions, and configurable keywords
 - Suppressed when you're focused on the relevant channel
 - Suppressed entirely while you're in DND/snooze
+- Huddle start (`on_huddle`, default on) — a toast + desktop ping when a huddle starts in a channel; see Huddles below
+
+## Huddles
+
+slk shows huddle activity live (sourced from the same `sh_room_join` /
+`sh_room_leave` WebSocket events the official client uses) and hands off to
+Slack to join — it carries no audio itself.
+
+- **Sidebar badge** — channels with an active huddle show a `🎧N` badge (N = participant count), kept live as people join and leave
+- **Channel-header line** — the open channel shows `🎧 Huddle · alice, bob` under its title
+- **Start notification** — a toast (and desktop ping) when a huddle starts, gated by `[notifications] on_huddle` and suppressed in DND
+- **Join handoff** (`H`) — opens the huddle in the official Slack desktop/web client to talk; slk stays awareness-only
 
 ## External commands
 
