@@ -23,11 +23,24 @@ func TestHuddleBadge_RendersWithCount(t *testing.T) {
 	if line == "" {
 		t.Fatalf("general row not rendered:\n%s", view)
 	}
-	if !strings.Contains(line, "🎧") {
-		t.Errorf("expected huddle headphone glyph on the row:\n%q", line)
+	// The emoji and count render inside one styled span (no ANSI between
+	// them), so assert the contiguous "🎧3" — a bare "3" could match a digit
+	// inside an ANSI escape.
+	if !strings.Contains(line, "🎧3") {
+		t.Errorf("expected the huddle badge 🎧3 on the row:\n%q", line)
 	}
-	if !strings.Contains(line, "3") {
-		t.Errorf("expected participant count 3 in the badge:\n%q", line)
+}
+
+// A multi-digit participant count renders fully (the width budget scales
+// with the digit count rather than a fixed 4 columns).
+func TestHuddleBadge_MultiDigitCount(t *testing.T) {
+	m := New([]ChannelItem{
+		{ID: "C1", Name: "general", Type: "channel", HuddleCount: 12},
+	})
+	m.ToggleCollapse("Channels")
+	view := m.View(10, 40)
+	if !strings.Contains(view, "🎧12") {
+		t.Errorf("expected the full 🎧12 badge:\n%s", view)
 	}
 }
 

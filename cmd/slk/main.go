@@ -4190,6 +4190,11 @@ func (h *rtmEventHandler) OnHuddleChanged(channelID string, participantIDs []str
 	if h.wsCtx == nil || h.wsCtx.HuddleStore == nil || channelID == "" {
 		return
 	}
+	// Real events always carry room.huddle_link, but guard against an empty
+	// one so the 'H' handoff still has a usable slack:// deep link.
+	if huddleURL == "" {
+		huddleURL = slackclient.HuddleOpenURL(h.wsCtx.TeamID, "", channelID)
+	}
 	becameActive, _ := h.wsCtx.HuddleStore.Set(channelID, participantIDs, huddleURL)
 
 	if becameActive && h.notifyCfg.EffectiveOnHuddle() {

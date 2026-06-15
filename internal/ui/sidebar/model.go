@@ -1282,9 +1282,9 @@ func (m *Model) buildCache(width int) {
 		name := item.Name
 		maxNameLen := (width - 2) - 8
 		if item.HuddleCount > 0 {
-			// Reserve room for the trailing " 🎧N" badge (space + 2-cell
-			// emoji + at least one digit).
-			maxNameLen -= 4
+			// Reserve room for the trailing " 🎧N" badge: space(1) +
+			// 2-cell emoji(2) + the count's digits (so 🎧12 reserves 5).
+			maxNameLen -= 3 + len(strconv.Itoa(item.HuddleCount))
 		}
 		if maxNameLen < 5 {
 			maxNameLen = 5
