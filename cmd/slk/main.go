@@ -150,6 +150,12 @@ type WorkspaceContext struct {
 	// foreground for muted channels. Nil when the bootstrap fetch
 	// failed or hasn't run yet — callers must nil-check before use.
 	MuteStore *service.MuteStore
+	// HuddleStore tracks which channels currently have an active huddle and
+	// who is in each, fed live by sh_room_join / sh_room_leave WS events.
+	// Read by the sidebar badge and channel-header huddle line. Never nil
+	// once the workspace context is built (huddle state is event-driven, no
+	// bootstrap needed).
+	HuddleStore *service.HuddleStore
 	// ThreadsHasUnreads is the workspace-wide threads-have-any-unread
 	// signal returned by client.counts on startup. The local SQLite
 	// heuristic for per-thread unread state can produce false positives
@@ -1588,6 +1594,7 @@ func run() error {
 			UserID:           wctx.UserID,
 			CustomEmoji:      wctx.CustomEmoji,
 			SectionsProvider: sectionsProviderAdapter{store: wctx.SectionStore},
+			HuddleProvider:   wctx.HuddleStore,
 		}
 	})
 
@@ -1747,6 +1754,7 @@ func run() error {
 				UserID:           wctx.UserID,
 				CustomEmoji:      wctx.CustomEmoji, // empty at this point; filled by the goroutine below
 				SectionsProvider: sectionsProviderAdapter{store: wctx.SectionStore},
+				HuddleProvider:   wctx.HuddleStore,
 				InitialActive:    isInitial,
 				LastChannelID:    mostRecentlyVisitedChannel(wctx.LastVisitedByChannel),
 			})
@@ -1849,6 +1857,7 @@ func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB
 		BotUserIDs:           make(map[string]bool),
 		CustomEmoji:          make(map[string]string),
 		LastVisitedByChannel: make(map[string]int64),
+		HuddleStore:          service.NewHuddleStore(),
 	}
 	wctx.SubscriptionsAvailable = true
 
@@ -4170,6 +4179,63 @@ func (h *rtmEventHandler) OnMemberLeft(channelID, userID string) {
 		return
 	}
 	h.wsCtx.Membership.ApplyLeave(channelID, userID)
+}
+
+// OnHuddleChanged handles sh_room_join / sh_room_leave huddle events. It
+// updates the HuddleStore from the room's authoritative participant list,
+// fires a one-shot toast + desktop notification when a huddle starts (subject
+// to the on_huddle config and DND), and nudges the UI to re-render the sidebar
+// badge and channel-header huddle line.
+func (h *rtmEventHandler) OnHuddleChanged(channelID string, participantIDs []string, huddleURL string) {
+	if h.wsCtx == nil || h.wsCtx.HuddleStore == nil || channelID == "" {
+		return
+	}
+	becameActive, _ := h.wsCtx.HuddleStore.Set(channelID, participantIDs, huddleURL)
+
+	if becameActive && h.notifyCfg.EffectiveOnHuddle() {
+		isDND := h.wsCtx.DNDEnabled && (h.wsCtx.DNDEndTS.IsZero() || time.Now().Before(h.wsCtx.DNDEndTS))
+		if !isDND {
+			label := "a channel"
+			if chName := h.channelNames[channelID]; chName != "" {
+				label = "#" + chName
+			}
+			if h.program != nil {
+				h.program.Send(ui.ToastMsg{Text: "🎧 Huddle started in " + label})
+			}
+			if h.notifier != nil {
+				go h.notifier.Notify(h.workspaceName+": 🎧 Huddle", "Huddle started in "+label)
+			}
+		}
+	}
+
+	// Re-render the sidebar badges for the active workspace by refreshing
+	// each channel item's HuddleCount and pushing the standard
+	// channel-list-attributes-changed signal (same path as mute changes).
+	h.refreshHuddlesForActive()
+}
+
+// refreshHuddlesForActive walks wctx.Channels, refreshes each item's
+// HuddleCount from the current HuddleStore, and posts a SectionsRefreshedMsg
+// so the App rebuilds the sidebar from the updated list. Mirrors
+// refreshMutedForActive (the App treats SectionsRefreshedMsg as a generic
+// "channel-list attributes changed" signal).
+func (h *rtmEventHandler) refreshHuddlesForActive() {
+	if h.wsCtx == nil || h.wsCtx.HuddleStore == nil {
+		return
+	}
+	store := h.wsCtx.HuddleStore
+	for i := range h.wsCtx.Channels {
+		h.wsCtx.Channels[i].HuddleCount = store.Count(h.wsCtx.Channels[i].ID)
+	}
+	if h.program == nil {
+		return
+	}
+	if h.isActive != nil && !h.isActive() {
+		return
+	}
+	channelsCopy := make([]sidebar.ChannelItem, len(h.wsCtx.Channels))
+	copy(channelsCopy, h.wsCtx.Channels)
+	h.program.Send(ui.SectionsRefreshedMsg{TeamID: h.workspaceID, Channels: channelsCopy})
 }
 
 // refreshMutedForActive walks wctx.Channels, refreshes each item's

@@ -3,6 +3,7 @@ package sidebar
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,10 @@ type ChannelItem struct {
 	// section headers. Sourced from service.MuteStore in
 	// buildChannelItem.
 	IsMuted bool
+	// HuddleCount is the number of participants in this channel's active
+	// huddle, 0 when there is none. Sourced live from service.HuddleStore
+	// via the huddle refresh path. Drives the sidebar huddle badge.
+	HuddleCount int
 }
 
 // IsVisiblyUnread reports whether this channel should render as having
@@ -1112,6 +1117,7 @@ func (m *Model) buildCache(width int) {
 	activeBorderStyle := lipgloss.NewStyle().Foreground(styles.Warning)
 	dotStyle := lipgloss.NewStyle().Foreground(styles.Primary)
 	privateStyle := lipgloss.NewStyle().Foreground(styles.Warning)
+	huddleStyle := lipgloss.NewStyle().Foreground(styles.Warning)
 
 	cursorSelected := cursorStyle.Render("▌")
 	activeBorder := activeBorderStyle.Render("▌")
@@ -1230,6 +1236,14 @@ func (m *Model) buildCache(width int) {
 			unreadDot = unreadDotStr
 		}
 
+		// Huddle badge: "🎧N" trailing the unread dot when this channel has
+		// an active huddle. Rendered fg-only so it inherits the row bg (the
+		// post-reset reapply below restores bg for any trailing content).
+		huddleBadge := ""
+		if item.HuddleCount > 0 {
+			huddleBadge = " " + huddleStyle.Render("🎧"+strconv.Itoa(item.HuddleCount))
+		}
+
 		var prefix string
 		switch item.Type {
 		case "dm":
@@ -1267,6 +1281,11 @@ func (m *Model) buildCache(width int) {
 		// This assumes worst-case 2-col rendering for every ambiguous char.
 		name := item.Name
 		maxNameLen := (width - 2) - 8
+		if item.HuddleCount > 0 {
+			// Reserve room for the trailing " 🎧N" badge (space + 2-cell
+			// emoji + at least one digit).
+			maxNameLen -= 4
+		}
 		if maxNameLen < 5 {
 			maxNameLen = 5
 		}
@@ -1279,9 +1298,9 @@ func (m *Model) buildCache(width int) {
 		// View() picks: selected if cursor is on this row, else active
 		// if this row's channelID matches activeID, else normal. The
 		// cursor takes precedence so j/k feedback stays unambiguous.
-		labelNormal := " " + prefix + name + " " + unreadDot
-		labelSelected := cursorSelected + prefix + name + " " + unreadDot
-		labelActive := activeBorder + prefix + name + " " + unreadDot
+		labelNormal := " " + prefix + name + " " + unreadDot + huddleBadge
+		labelSelected := cursorSelected + prefix + name + " " + unreadDot + huddleBadge
+		labelActive := activeBorder + prefix + name + " " + unreadDot + huddleBadge
 
 		// Re-apply theme attrs after ANSI resets emitted by inline styled
 		// glyphs (cursor, prefix, unread dot) so the outer lipgloss

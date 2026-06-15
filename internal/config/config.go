@@ -179,6 +179,21 @@ type Notifications struct {
 	OnDM       bool     `toml:"on_dm"`
 	OnKeyword  []string `toml:"on_keyword"`
 	QuietHours string   `toml:"quiet_hours"`
+	// OnHuddle fires a toast (and desktop notification, subject to the same
+	// quiet-hours rules) when a huddle starts in a channel. Pointer so an
+	// unset value can default to enabled while still honoring an explicit
+	// false. See EffectiveOnHuddle.
+	OnHuddle *bool `toml:"on_huddle"`
+}
+
+// EffectiveOnHuddle reports whether huddle-start notifications are on:
+// notifications must be enabled overall, and on_huddle defaults to true when
+// unset.
+func (n Notifications) EffectiveOnHuddle() bool {
+	if !n.Enabled {
+		return false
+	}
+	return n.OnHuddle == nil || *n.OnHuddle
 }
 
 type CacheConfig struct {

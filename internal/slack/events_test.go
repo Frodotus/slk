@@ -51,6 +51,14 @@ type mockEventHandler struct {
 
 	memberJoined []memberEventRecord
 	memberLeft   []memberEventRecord
+
+	huddleChanges []huddleChangeRecord
+}
+
+type huddleChangeRecord struct {
+	channelID    string
+	participants []string
+	url          string
 }
 
 type prefChangeRecord struct {
@@ -158,6 +166,44 @@ func (m *mockEventHandler) OnMemberJoined(channelID, userID string) {
 }
 func (m *mockEventHandler) OnMemberLeft(channelID, userID string) {
 	m.memberLeft = append(m.memberLeft, memberEventRecord{channelID, userID})
+}
+func (m *mockEventHandler) OnHuddleChanged(channelID string, participantIDs []string, huddleURL string) {
+	m.huddleChanges = append(m.huddleChanges, huddleChangeRecord{channelID, participantIDs, huddleURL})
+}
+
+// TestDispatchHuddleRoomEvents uses the real captured sh_room_join /
+// sh_room_leave payloads (trimmed) to verify the dispatcher extracts the
+// channel, participants, and join link — and that non-huddle call families
+// are ignored.
+func TestDispatchHuddleRoomEvents(t *testing.T) {
+	handler := &mockEventHandler{}
+
+	join := `{"type":"sh_room_join","room":{"id":"R0BA133JU11","call_family":"huddle","participants":["U092ME3TU2C"],"channels":["C0ADYUWBF8C"],"huddle_link":"https://app.slack.com/huddle/T9L59DLMP/C0ADYUWBF8C"},"user":"U092ME3TU2C","huddle":{"channel_id":"C0ADYUWBF8C"}}`
+	dispatchWebSocketEvent([]byte(join), handler)
+	if len(handler.huddleChanges) != 1 {
+		t.Fatalf("sh_room_join: want 1 huddle change, got %d", len(handler.huddleChanges))
+	}
+	got := handler.huddleChanges[0]
+	if got.channelID != "C0ADYUWBF8C" || len(got.participants) != 1 || got.participants[0] != "U092ME3TU2C" {
+		t.Errorf("join parsed wrong: %+v", got)
+	}
+	if got.url != "https://app.slack.com/huddle/T9L59DLMP/C0ADYUWBF8C" {
+		t.Errorf("join url = %q", got.url)
+	}
+
+	// Leave empties the participant list.
+	leave := `{"type":"sh_room_leave","room":{"id":"R0BA133JU11","call_family":"huddle","participants":[],"channels":["C0ADYUWBF8C"]},"user":"U092ME3TU2C","huddle":{"channel_id":"C0ADYUWBF8C"}}`
+	dispatchWebSocketEvent([]byte(leave), handler)
+	if len(handler.huddleChanges) != 2 || len(handler.huddleChanges[1].participants) != 0 {
+		t.Errorf("sh_room_leave should report empty participants, got %+v", handler.huddleChanges)
+	}
+
+	// A non-huddle call family is ignored.
+	call := `{"type":"sh_room_join","room":{"id":"R2","call_family":"call","participants":["U1"],"channels":["C9"]},"huddle":{"channel_id":"C9"}}`
+	dispatchWebSocketEvent([]byte(call), handler)
+	if len(handler.huddleChanges) != 2 {
+		t.Errorf("non-huddle call_family must be ignored, got %d changes", len(handler.huddleChanges))
+	}
 }
 
 func TestEventHandlerInterface(t *testing.T) {

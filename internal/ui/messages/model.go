@@ -259,7 +259,13 @@ type Model struct {
 	chromeChannel     string
 	chromeTopic       string
 	chromeChannelType string
+	chromeHuddle      string
 	chromeCacheValid  bool
+
+	// channelHuddle is the pre-formatted huddle header line for the open
+	// channel (e.g. "🎧 Huddle · alice, bob"), or "" when there is no active
+	// huddle. Set by the App from its HuddleProvider via SetChannelHuddle.
+	channelHuddle string
 
 	// Cumulative line offsets, computed in buildCache (only when content
 	// changes). entryOffsets[i] is the line index where entry i starts in the
@@ -613,6 +619,18 @@ func (m *Model) SetChannel(name, topic string) {
 	}
 	m.channelName = name
 	m.channelTopic = topic
+}
+
+// SetChannelHuddle sets the pre-formatted huddle header line for the open
+// channel (e.g. "🎧 Huddle · alice, bob"), or "" to clear it. A change
+// invalidates only the header chrome cache.
+func (m *Model) SetChannelHuddle(line string) {
+	if m.channelHuddle == line {
+		return
+	}
+	m.channelHuddle = line
+	m.chromeCacheValid = false
+	m.dirty()
 }
 
 // SetChannelType sets the channel type used to pick the header glyph
@@ -2847,7 +2865,7 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 	// Chrome (header + separator) is cached; only rebuilt on width / channel
 	// name / topic change. This avoids per-keypress strings.Repeat + lipgloss
 	// renders that don't depend on the selection.
-	if !m.chromeCacheValid || m.chromeWidth != width || m.chromeChannel != m.channelName || m.chromeTopic != m.channelTopic || m.chromeChannelType != m.channelType {
+	if !m.chromeCacheValid || m.chromeWidth != width || m.chromeChannel != m.channelName || m.chromeTopic != m.channelTopic || m.chromeChannelType != m.channelType || m.chromeHuddle != m.channelHuddle {
 		// Channel title sits in the message pane, immediately inside the
 		// panel's top border. Bold + TextPrimary on Background matches
 		// the surrounding messages. The panel border itself provides
@@ -2873,12 +2891,19 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 			topicStyle := styles.Timestamp.Width(width).Background(styles.Background)
 			header += "\n" + topicStyle.Render(WordWrap(m.channelTopic, width))
 		}
+		if m.channelHuddle != "" {
+			// Huddle line under the title/topic. Width(width) keeps the
+			// every-chrome-line-is-exactly-width invariant (see above).
+			huddleStyle := lipgloss.NewStyle().Width(width).Background(styles.Background).Foreground(styles.Warning).Padding(0, 1)
+			header += "\n" + huddleStyle.Render(WordWrap(m.channelHuddle, width-2))
+		}
 		m.chromeCache = header
 		m.chromeHeight = lipgloss.Height(m.chromeCache)
 		m.chromeWidth = width
 		m.chromeChannel = m.channelName
 		m.chromeTopic = m.channelTopic
 		m.chromeChannelType = m.channelType
+		m.chromeHuddle = m.channelHuddle
 		m.chromeCacheValid = true
 	}
 	chrome := m.chromeCache

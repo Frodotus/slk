@@ -34,6 +34,8 @@ enabled = true
 on_mention = true
 on_dm = true
 on_keyword = ["deploy", "incident"]
+on_huddle = true              # toast + desktop ping when a huddle starts in a
+                              # channel (default true when notifications are on)
 quiet_hours = "22:00-08:00"   # planned
 
 [cache]
